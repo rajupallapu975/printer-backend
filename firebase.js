@@ -1,20 +1,13 @@
 const admin = require("firebase-admin");
-const serviceAccount = require("./serviceAccountKey.json");
 
-/**
- * Initialize Firebase Admin SDK
- * - Firestore ONLY
- * - No Firebase Storage (Option 2)
- */
 admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
+  credential: admin.credential.cert({
+    projectId: process.env.FIREBASE_PROJECT_ID,
+    clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+    privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n"),
+  }),
 });
 
-/**
- * Firestore (database)
- */
 const db = admin.firestore();
 
-module.exports = {
-  db,
-};
+module.exports = { db };
