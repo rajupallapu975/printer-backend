@@ -169,13 +169,15 @@ app.post(
     });
 
     // 📥 DOWNLOAD FILES FROM CLOUDINARY IF URLs EXIST
+    const orderId = orderData.orderId || doc.id; // Fallback to doc ID if orderId is missing
+
     if (orderData.fileUrls && orderData.fileUrls.length > 0) {
-      const dir = path.join(__dirname, "uploads", orderData.orderId);
+      const dir = path.join(__dirname, "uploads", orderId);
       if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
       }
 
-      console.log(`🌐 Downloading ${orderData.fileUrls.length} files for order ${orderData.orderId}...`);
+      console.log(`🌐 Downloading ${orderData.fileUrls.length} files for order ${orderId}...`);
 
       for (let i = 0; i < orderData.fileUrls.length; i++) {
         const url = orderData.fileUrls[i];
