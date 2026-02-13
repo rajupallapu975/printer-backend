@@ -256,6 +256,10 @@ app.post(
 
     const orderDoc = snap.docs[0];
     const order = orderDoc.data();
+
+    // Allow re-printing via trigger even if status is PRINTED
+    console.log(`ℹ️ Triggering print for ${pickupCode} (Status: ${order.printStatus})`);
+
     const orderId = order.orderId;
     const fileUrls = order.fileUrls || [];
 
