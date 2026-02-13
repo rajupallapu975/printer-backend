@@ -162,14 +162,8 @@ app.post(
     await db.runTransaction(async (tx) => {
       const data = (await tx.get(ref)).data();
 
-      // Allow re-printing for testing
-      if (!data.printStatus) { // Only strict check if status is missing/null
-        const err = new Error("Order status invalid");
-        err.status = 400;
-        throw err;
-      }
-
-      console.log(`ℹ️ Order ${data.orderId} status: ${data.printStatus} (Allowing reprint)`);
+      // Allow re-printing and status-less orders for testing
+      console.log(`ℹ️ Order ${data.orderId} status: ${data.printStatus || "NONE"} (Allowing print)`);
 
       tx.update(ref, { printStatus: "PRINTING" });
     });
