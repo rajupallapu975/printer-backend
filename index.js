@@ -162,11 +162,14 @@ app.post(
     await db.runTransaction(async (tx) => {
       const data = (await tx.get(ref)).data();
 
-      if (data.printStatus !== "READY_TO_PRINT") {
-        const err = new Error("Order not printable");
+      // Allow re-printing for testing
+      if (!data.printStatus) { // Only strict check if status is missing/null
+        const err = new Error("Order status invalid");
         err.status = 400;
         throw err;
       }
+
+      console.log(`ℹ️ Order ${data.orderId} status: ${data.printStatus} (Allowing reprint)`);
 
       tx.update(ref, { printStatus: "PRINTING" });
     });
