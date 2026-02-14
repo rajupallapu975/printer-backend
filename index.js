@@ -45,9 +45,16 @@ const { createOrder } = require("./order");
 
 app.post("/create-order", async (req, res) => {
   try {
-    const { printSettings } = req.body;
+   const { printSettings, userId } = req.body;
 
-    const result = await createOrder(printSettings);
+if (!userId) {
+  return res.status(400).json({
+    error: "userId is required"
+  });
+}
+
+const result = await createOrder(printSettings, userId);
+
 
     res.json({
       orderId: result.orderId,
