@@ -21,7 +21,6 @@ async function generateUniquePickupCode() {
 
     const snapshot = await db.collection("orders")
       .where("pickupCode", "==", code)
-      .where("printStatus", "!=", "PRINTED")
       .limit(1)
       .get();
 
@@ -30,6 +29,7 @@ async function generateUniquePickupCode() {
 
   return code;
 }
+
 
 /* =================================================
    CREATE ORDER
