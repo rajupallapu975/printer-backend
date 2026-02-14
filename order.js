@@ -1,32 +1,43 @@
 const { db } = require("./firebase");
+const admin = require("firebase-admin");
 
 /* =================================================
    HELPERS
 ================================================= */
 
-/**
- * Generate unique order ID
- */
 function generateOrderId() {
   return "ORD_" + Date.now();
 }
 
 /**
- * Generate 6-digit pickup code (ONE-TIME)
+ * Generate UNIQUE 6-digit pickup code
  */
-function generatePickupCode() {
-  return Math.floor(100000 + Math.random() * 900000).toString();
+async function generateUniquePickupCode() {
+  let code;
+  let exists = true;
+
+  while (exists) {
+    code = Math.floor(100000 + Math.random() * 900000).toString();
+
+    const snapshot = await db.collection("orders")
+      .where("pickupCode", "==", code)
+      .where("printStatus", "!=", "PRINTED")
+      .limit(1)
+      .get();
+
+    exists = !snapshot.empty;
+  }
+
+  return code;
 }
 
 /* =================================================
    CREATE ORDER
-   - Called only after payment confirmation
-   - pickupCode generated here
-   - printSettings stored safely
 ================================================= */
-async function createOrder(printSettings) {
+
+async function createOrder(printSettings, userId)
+ {
   try {
-    // 🔐 Validate input
     if (!printSettings || typeof printSettings !== "object") {
       const err = new Error("Invalid printSettings");
       err.status = 400;
@@ -34,39 +45,34 @@ async function createOrder(printSettings) {
     }
 
     const orderId = generateOrderId();
-    const pickupCode = generatePickupCode();
+    const pickupCode = await generateUniquePickupCode();
 
-    await db.collection("orders").doc(orderId).set({
-      orderId,
-      pickupCode,
+await db.collection("orders").doc(orderId).set({
+  orderId,
+  pickupCode,
+  userId, // 🔥 ADD THIS
 
-      // 🔑 MAIN DATA
-      printSettings, // stored once, immutable for printing
+  printSettings,
+  paymentStatus: "PAID",
+  status: "ACTIVE",
+  printStatus: "READY",
+  printedAt: null,
 
-      paymentStatus: "PAID",
-      printStatus: "READY_TO_PRINT",
-      printedAt: null,
+  createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
 
-      createdAt: new Date(),
-    });
+  fileUrls: [],
+});
+
 
     return { orderId, pickupCode };
-  } catch (err) {
-    console.error("❌ CREATE ORDER DB ERROR:", {
-      message: err.message,
-    });
 
-    /*
-      Bubble error up to index.js global handler
-      (Never swallow DB errors)
-    */
+  } catch (err) {
+    console.error("❌ CREATE ORDER DB ERROR:", err.message);
     throw err;
   }
 }
 
-/* =================================================
-   EXPORTS
-================================================= */
 module.exports = {
   createOrder,
 };

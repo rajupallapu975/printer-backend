@@ -17,11 +17,8 @@ const admin = require("firebase-admin");
 // ============================================================================
 // FIREBASE INITIALIZATION
 // ============================================================================
-const serviceAccount = require("./serviceAccountKey.json");
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount)
-});
-const db = admin.firestore();
+const { db } = require("./firebase");
+
 // ============================================================================
 // EXPRESS APP SETUP
 // ============================================================================
@@ -39,6 +36,32 @@ app.get("/", (req, res) => {
     timestamp: new Date().toISOString()
   });
 });
+
+
+// ============================================================================
+// ENDPOINT: CREATE ORDER
+// ============================================================================
+const { createOrder } = require("./order");
+
+app.post("/create-order", async (req, res) => {
+  try {
+    const { printSettings } = req.body;
+
+    const result = await createOrder(printSettings);
+
+    res.json({
+      orderId: result.orderId,
+      pickupCode: result.pickupCode,
+    });
+
+  } catch (err) {
+    console.error("❌ Create order error:", err.message);
+    res.status(err.status || 500).json({
+      error: err.message || "Internal server error",
+    });
+  }
+});
+
 // ============================================================================
 // ENDPOINT: VERIFY PICKUP CODE
 // ============================================================================
@@ -60,7 +83,7 @@ app.post("/verify-pickup-code", async (req, res) => {
     const ordersRef = db.collection('orders');
     const snapshot = await ordersRef
       .where('pickupCode', '==', pickupCode)
-      .where('status', '==', 'active')
+      .where('status', '==', 'ACTIVE')
       .limit(1)
       .get();
     // Check if order exists
@@ -76,7 +99,7 @@ app.post("/verify-pickup-code", async (req, res) => {
     const orderData = orderDoc.data();
     const orderId = orderDoc.id;
     // Check if order has already been printed
-    if (orderData.printStatus === 'printed') {
+    if (orderData.printStatus === 'PRINTED') {
       console.log(`⚠️ Order ${orderId} already printed`);
       return res.status(400).json({
         success: false,
@@ -139,8 +162,8 @@ app.post("/mark-printed", async (req, res) => {
     // Update order in Firestore
     const orderRef = db.collection('orders').doc(orderId);
     await orderRef.update({
-      status: 'completed',
-      printStatus: 'printed',
+      status: 'COMPLETED',
+printStatus: 'PRINTED',
       printedAt: admin.firestore.FieldValue.serverTimestamp(),
       pickupCode: null // Revoke the code
     });
