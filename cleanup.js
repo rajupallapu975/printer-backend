@@ -3,12 +3,12 @@ const { db } = require("./firebase");
 const cloudinary = require("cloudinary").v2;
 
 // ============================================================================
-// CLOUDINARY CONFIGURATION (REPLACE WITH YOUR KEYS)
+// CLOUDINARY CONFIGURATION (READ FROM .ENV)
 // ============================================================================
 cloudinary.config({
-    cloud_name: 'dpmpyvmbg',
-    api_key: '239257584915646', // From your screenshot
-    api_secret: 'NjymN68_G7QXwbB6YfSR1x9kU7g' // 🔑 NEED THIS
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET
 });
 
 /**

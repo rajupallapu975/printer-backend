@@ -15,6 +15,7 @@
     "express": "^5.2.1",
     "firebase-admin": "^13.6.0",
     "multer": "^2.0.2",
-    "cloudinary": "^2.5.1"
+    "cloudinary": "^2.5.1",
+    "dotenv": "^16.4.7"
   }
 }

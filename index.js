@@ -1,16 +1,5 @@
 // ============================================================================
-// PRINTER BACKEND SERVER
-// ============================================================================
-// This server acts as a bridge between:
-// 1. Flutter App (creates orders with Cloudinary URLs)
-// 2. Raspberry Pi (verifies codes and downloads files)
-// 
-// ARCHITECTURE:
-// - Flutter uploads files to Cloudinary
-// - Flutter saves order to Firebase Firestore
-// - This backend queries Firestore to verify pickup codes
-// - Raspberry Pi downloads files directly from Cloudinary URLs
-// ============================================================================
+require('dotenv').config();
 const express = require("express");
 const cors = require("cors");
 const admin = require("firebase-admin");
