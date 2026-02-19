@@ -1,43 +1,39 @@
-const admin = require("firebase-admin");
+require('dotenv').config();
 const { db } = require("./firebase");
 const cloudinary = require("cloudinary").v2;
 
 // ============================================================================
-// CLOUDINARY CONFIGURATION (READ FROM .ENV)
+// CLOUDINARY CONFIGURATION
 // ============================================================================
 cloudinary.config({
     cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-    api_key: process.env.CLOUDINARY_API_KEY,
+    api_key: process.env.CLOUDINARY_API_KEY,   // Use ROOT key
     api_secret: process.env.CLOUDINARY_API_SECRET
 });
 
-/**
- * Cleanup function to find expired orders and delete cloud files
- */
+// ============================================================================
+// AUTO CLEANUP FUNCTION (Background)
+// ============================================================================
 async function performCleanup() {
     console.log("🧹 Starting background cleanup task...");
 
     try {
-        const twelveHoursAgo = new Date(Date.now() - 1 * 60 * 1000);
+        const expiryTime = new Date(Date.now() - 12 * 60 * 60 * 1000); 
+        // Change 1 min to 12 * 60 * 60 * 1000 for 12 hours in production
 
-        // Find ACTIVE orders older than 12 hours
         const snapshot = await db.collection("orders")
-            .where("status", "==", "ACTIVE")
-            .where("createdAt", "<=", twelveHoursAgo)
+            .where("createdAt", "<=", expiryTime)
             .get();
 
         if (snapshot.empty) {
-            console.log("✅ No matching orders found for cleanup.");
+            console.log("✅ No expired orders found.");
             return;
         }
 
-        console.log(`🔍 Found ${snapshot.size} expired orders for cleanup.`);
+        console.log(`🔍 Found ${snapshot.size} expired orders.`);
 
         for (const doc of snapshot.docs) {
-            const orderData = doc.data();
-            const orderId = doc.id;
-
-            await cleanupOrder(orderId, orderData);
+            await cleanupOrder(doc.id, doc.data());
         }
 
     } catch (error) {
@@ -45,31 +41,42 @@ async function performCleanup() {
     }
 }
 
-/**
- * Clean up a specific order: Delete from Cloudinary and archive in Firestore
- */
+// ============================================================================
+// CLEANUP SINGLE ORDER
+// ============================================================================
 async function cleanupOrder(orderId, orderData) {
     try {
         const publicIds = orderData.publicIds || [];
 
-        // 1. Delete from Cloudinary
+        console.log("Public IDs from Firestore:", publicIds);
+
         if (publicIds.length > 0) {
-            console.log(`☁️ Deleting ${publicIds.length} files from Cloudinary for order ${orderId}...`);
-            await cloudinary.api.delete_resources(publicIds);
+            console.log(`☁️ Deleting ${publicIds.length} files from Cloudinary...`);
+
+            for (const publicId of publicIds) {
+
+                // Try deleting as image first
+                let result = await cloudinary.uploader.destroy(publicId, {
+                    resource_type: "image"
+                });
+
+                // If not found, try raw
+                if (result.result === "not found") {
+                    result = await cloudinary.uploader.destroy(publicId, {
+                        resource_type: "raw"
+                    });
+                }
+
+                console.log(`Delete result for ${publicId}:`, result);
+            }
         }
 
-        // 2. Clear sensitive cloud info but KEEP metadata in history
-        await db.collection("orders").doc(orderId).update({
-            status: "EXPIRED",
-            fileUrls: [], // Remove URLs
-            publicIds: [], // Remove IDs
-            pickupCode: null, // Revoke code
-            cleanedUpAt: admin.firestore.FieldValue.serverTimestamp()
-        });
+        // Delete Firestore document
+        await db.collection("orders").doc(orderId).delete();
 
-        console.log(`✅ Order ${orderId} moved to history and cloud files deleted.`);
+        console.log(`🗑️ Order ${orderId} fully deleted.`);
     } catch (error) {
-        console.error(`❌ Failed to cleanup order ${orderId}:`, error);
+        console.error(`❌ Failed cleanup for ${orderId}:`, error);
     }
 }
 

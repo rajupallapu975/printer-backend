@@ -35,8 +35,7 @@ async function generateUniquePickupCode() {
    CREATE ORDER
 ================================================= */
 
-async function createOrder(printSettings, userId)
- {
+async function createOrder(printSettings, userId) {
   try {
     if (!printSettings || typeof printSettings !== "object") {
       const err = new Error("Invalid printSettings");
@@ -47,22 +46,22 @@ async function createOrder(printSettings, userId)
     const orderId = generateOrderId();
     const pickupCode = await generateUniquePickupCode();
 
-await db.collection("orders").doc(orderId).set({
-  orderId,
-  pickupCode,
-  userId, // 🔥 ADD THIS
+    await db.collection("orders").doc(orderId).set({
+      orderId,
+      pickupCode,
+      userId, // 🔥 ADD THIS
 
-  printSettings,
-  paymentStatus: "PAID",
-  status: "ACTIVE",
-  printStatus: "READY",
-  printedAt: null,
+      printSettings,
+      paymentStatus: "PAID",
+      status: "ACTIVE",
+      printStatus: "READY",
+      printedAt: null,
 
-  createdAt: admin.firestore.FieldValue.serverTimestamp(),
-  expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000),
 
-  fileUrls: [],
-});
+      fileUrls: [],
+    });
 
 
     return { orderId, pickupCode };

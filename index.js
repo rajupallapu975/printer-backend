@@ -9,8 +9,8 @@ const admin = require("firebase-admin");
 const { db } = require("./firebase");
 const { performCleanup, cleanupOrder } = require("./cleanup");
 
-// Run cleanup task every hour
-setInterval(performCleanup, 30 * 1000);
+// Run automated cleanup task every 5 minutes to delete 12h+ old orders
+setInterval(performCleanup, 5 * 60 * 1000);
 // Initial cleanup on server start
 performCleanup();
 
