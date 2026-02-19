@@ -18,6 +18,12 @@ const admin = require("firebase-admin");
 // FIREBASE INITIALIZATION
 // ============================================================================
 const { db } = require("./firebase");
+const { performCleanup, cleanupOrder } = require("./cleanup");
+
+// Run cleanup task every hour
+setInterval(performCleanup, 30 * 1000);
+// Initial cleanup on server start
+performCleanup();
 
 // ============================================================================
 // EXPRESS APP SETUP
@@ -45,15 +51,15 @@ const { createOrder } = require("./order");
 
 app.post("/create-order", async (req, res) => {
   try {
-   const { printSettings, userId } = req.body;
+    const { printSettings, userId } = req.body;
 
-if (!userId) {
-  return res.status(400).json({
-    error: "userId is required"
-  });
-}
+    if (!userId) {
+      return res.status(400).json({
+        error: "userId is required"
+      });
+    }
 
-const result = await createOrder(printSettings, userId);
+    const result = await createOrder(printSettings, userId);
 
 
     res.json({
@@ -170,10 +176,19 @@ app.post("/mark-printed", async (req, res) => {
     const orderRef = db.collection('orders').doc(orderId);
     await orderRef.update({
       status: 'COMPLETED',
-printStatus: 'PRINTED',
+      printStatus: 'PRINTED',
       printedAt: admin.firestore.FieldValue.serverTimestamp(),
       pickupCode: null // Revoke the code
     });
+
+    // 🔥 NEW: Instantly cleanup Cloudinary storage after successful print
+    const orderDoc = await orderRef.get();
+    if (orderDoc.exists) {
+      const orderData = orderDoc.data();
+      // Delete from Cloudinary but keep metadata in Firestore history
+      await cleanupOrder(orderId, orderData);
+    }
+
     console.log(`✅ Order ${orderId} marked as printed`);
     res.json({
       success: true,
