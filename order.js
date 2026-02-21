@@ -10,6 +10,24 @@ function generateOrderId() {
 }
 
 /**
+ * Calculate cost based on print settings
+ * Color: ₹10 per page
+ * B/W: ₹3 per page
+ */
+function calculateCost(printSettings) {
+  let total = 0;
+  if (!printSettings.files || !Array.isArray(printSettings.files)) return 0;
+
+  for (const file of printSettings.files) {
+    const unitPrice = file.color === "COLOR" ? 10 : 3;
+    const pages = file.pageCount || 1;
+    const copies = file.copies || 1;
+    total += unitPrice * pages * copies;
+  }
+  return total;
+}
+
+/**
  * Generate UNIQUE 6-digit pickup code
  */
 async function generateUniquePickupCode() {
@@ -35,7 +53,7 @@ async function generateUniquePickupCode() {
    CREATE ORDER
 ================================================= */
 
-async function createOrder(printSettings, userId) {
+async function createOrder(printSettings, userId, razorpayOrderId = null) {
   try {
     if (!printSettings || typeof printSettings !== "object") {
       const err = new Error("Invalid printSettings");
@@ -44,27 +62,35 @@ async function createOrder(printSettings, userId) {
     }
 
     const orderId = generateOrderId();
-    const pickupCode = await generateUniquePickupCode();
+    const totalPrice = calculateCost(printSettings);
 
-    await db.collection("orders").doc(orderId).set({
+    const orderData = {
       orderId,
-      pickupCode,
-      userId, // 🔥 ADD THIS
-
+      userId,
       printSettings,
-      paymentStatus: "PAID",
-      status: "ACTIVE",
+      totalPrice,
+      paymentStatus: razorpayOrderId ? "PENDING" : "PAID", // If we have a Razorpay ID, it's pending payment
+      status: razorpayOrderId ? "CREATED" : "ACTIVE",
       printStatus: "READY",
       printedAt: null,
-
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000),
-
       fileUrls: [],
-    });
+      razorpayOrderId: razorpayOrderId || null,
+    };
 
+    // If it's already paid (direct create), generate code now
+    if (!razorpayOrderId) {
+      orderData.pickupCode = await generateUniquePickupCode();
+    }
 
-    return { orderId, pickupCode };
+    await db.collection("orders").doc(orderId).set(orderData);
+
+    return {
+      orderId,
+      pickupCode: orderData.pickupCode || null,
+      totalPrice
+    };
 
   } catch (err) {
     console.error("❌ CREATE ORDER DB ERROR:", err.message);
@@ -74,4 +100,7 @@ async function createOrder(printSettings, userId) {
 
 module.exports = {
   createOrder,
+  calculateCost,
+  generateUniquePickupCode
 };
+
