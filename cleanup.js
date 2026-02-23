@@ -1,15 +1,5 @@
-require('dotenv').config();
 const { db } = require("./firebase");
-const cloudinary = require("cloudinary").v2;
-
-// ============================================================================
-// CLOUDINARY CONFIGURATION
-// ============================================================================
-cloudinary.config({
-    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-    api_key: process.env.CLOUDINARY_API_KEY,   // Use ROOT key
-    api_secret: process.env.CLOUDINARY_API_SECRET
-});
+const cloudinary = require("./cloudinary");
 
 // ============================================================================
 // AUTO CLEANUP FUNCTION (Background)
