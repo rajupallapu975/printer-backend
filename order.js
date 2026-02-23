@@ -49,10 +49,10 @@ async function generateUniquePickupCode() {
 }
 
 
-/* =================================================
-   CREATE ORDER
-================================================= */
-
+/**
+ * CREATE ORDER
+ */
+async function createOrder(printSettings, razorpayOrderId = null, amount = 0, totalPages = 0) {
   try {
     if (!printSettings || typeof printSettings !== "object") {
       const err = new Error("Invalid printSettings");
@@ -61,19 +61,23 @@ async function generateUniquePickupCode() {
     }
 
     const orderId = generateOrderId();
-    const totalPrice = calculateCost(printSettings);
+    
+    // Use passed amount/totalPages if provided, otherwise fallback to calculations
+    const finalAmount = amount || calculateCost(printSettings);
 
     const orderData = {
       orderId,
       printSettings,
-      totalPrice,
-      paymentStatus: razorpayOrderId ? "PENDING" : "PAID", // If we have a Razorpay ID, it's pending payment
+      amount: finalAmount,
+      totalPages: totalPages || (printSettings.files ? printSettings.files.reduce((sum, f) => sum + (f.pageCount || 1) * (f.copies || 1), 0) : 0),
+      paymentStatus: razorpayOrderId ? "PENDING" : "PAID",
       status: razorpayOrderId ? "CREATED" : "ACTIVE",
-      printStatus: "READY",
+      printStatus: "pending",
       printedAt: null,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000),
-      fileUrls: [],
+      expiresAt: admin.firestore.Timestamp.fromDate(new Date(Date.now() + 24 * 60 * 60 * 1000)), // 24h expiry
+      fileUrls: printSettings.files ? printSettings.files.map(f => f.url) : [],
+      publicIds: printSettings.files ? printSettings.files.map(f => f.publicId).filter(id => id) : [],
       razorpayOrderId: razorpayOrderId || null,
     };
 
@@ -87,14 +91,14 @@ async function generateUniquePickupCode() {
     return {
       orderId,
       pickupCode: orderData.pickupCode || null,
-      totalPrice
+      amount: finalAmount
     };
 
   } catch (err) {
     console.error("❌ CREATE ORDER DB ERROR:", err.message);
     throw err;
   }
-
+}
 
 module.exports = {
   createOrder,

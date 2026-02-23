@@ -19,7 +19,7 @@ async function performCleanup() {
 
     try {
         const expiryTime = new Date(Date.now() - 12 * 60 * 60 * 1000);
-       
+
 
         const snapshot = await db.collection("orders")
             .where("createdAt", "<=", expiryTime)
@@ -51,23 +51,12 @@ async function cleanupOrder(orderId, orderData, keepMetadata = false) {
         console.log("Public IDs from Firestore:", publicIds);
 
         if (publicIds.length > 0) {
-            console.log(`☁️ Deleting ${publicIds.length} files from Cloudinary...`);
-
-            for (const publicId of publicIds) {
-                // Try deleting as image first
-                let result = await cloudinary.uploader.destroy(publicId, {
-                    resource_type: "image"
-                });
-
-                // If not found, try raw
-                if (result.result === "not found") {
-                    result = await cloudinary.uploader.destroy(publicId, {
-                        resource_type: "raw"
-                    });
-                }
-
-                console.log(`Delete result for ${publicId}:`, result);
-            }
+            console.log(`🧹 Cleaning up ${publicIds.length} files from Cloudinary for order ${orderId}...`);
+            // Bulk delete as images
+            await cloudinary.api.delete_resources(publicIds, { resource_type: 'image' });
+            // Bulk delete as raw (for docs)
+            await cloudinary.api.delete_resources(publicIds, { resource_type: 'raw' });
+            console.log(`✅ Cloudinary cleanup complete for ${orderId}`);
         }
 
         if (keepMetadata) {
