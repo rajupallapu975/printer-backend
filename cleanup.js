@@ -19,7 +19,7 @@ async function performCleanup() {
 
     try {
         const expiryTime = new Date(Date.now() - 12 * 60 * 60 * 1000);
-        // Change 1 min to 12 * 60 * 60 * 1000 for 12 hours in production
+       
 
         const snapshot = await db.collection("orders")
             .where("createdAt", "<=", expiryTime)
