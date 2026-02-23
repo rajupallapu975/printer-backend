@@ -10,6 +10,11 @@ const admin = require("firebase-admin");
 // INTERNAL MODULES
 // ============================================================================
 const { db } = require("./firebase");
+const Razorpay = require("razorpay");
+const crypto = require("crypto");
+
+
+
 const { performCleanup, cleanupOrder } = require("./cleanup");
 const { createOrder, calculateCost, generateUniquePickupCode } = require("./order");
 const razorpay = require("./razorpay");
@@ -31,6 +36,98 @@ setInterval(performCleanup, 5 * 60 * 1000);   // Then every 5 minutes
 // ============================================================================
 // ENDPOINT: HEALTH CHECK
 // ============================================================================
+
+
+
+const razorpay = new Razorpay({
+  key_id: process.env.RAZORPAY_KEY_ID,
+  key_secret: process.env.RAZORPAY_KEY_SECRET,
+});
+
+
+
+
+// ============================================================================
+// CREATE RAZORPAY ORDER
+// ============================================================================
+app.post("/create-razorpay-order", async (req, res) => {
+  try {
+    const amount = Number(req.body.amount);
+    if (!amount) {
+      return res.status(400).json({ error: "Amount is required" });
+    }
+
+    const options = {
+      amount: Math.round(amount * 100), // Convert to paise (safely rounded)
+      currency: "INR",
+      receipt: `receipt_${Date.now()}`
+    };
+
+    const order = await razorpay.orders.create(options);
+
+    res.json({
+      razorpayOrderId: order.id,
+      amount: order.amount,
+      key: process.env.RAZORPAY_KEY_ID
+    });
+
+  } catch (error) {
+    console.error("❌ Razorpay order creation error:", error);
+    res.status(500).json({ error: "Failed to create Razorpay order" });
+  }
+});
+
+
+
+
+
+// ============================================================================
+// VERIFY PAYMENT & CREATE ORDER
+// ============================================================================
+app.post("/verify-payment", async (req, res) => {
+  try {
+    const {
+      razorpay_order_id,
+      razorpay_payment_id,
+      razorpay_signature,
+      printSettings,
+      userId,
+      amount,
+      totalPages
+    } = req.body;
+
+    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+      return res.status(400).json({ error: "Payment details missing" });
+    }
+
+    const generated_signature = crypto
+      .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
+      .update(razorpay_order_id + "|" + razorpay_payment_id)
+      .digest("hex");
+
+    if (generated_signature !== razorpay_signature) {
+      return res.status(400).json({ error: "Payment verification failed" });
+    }
+
+    // ✅ Payment verified — now create Firestore order
+    const result = await createOrder(printSettings, userId, amount, totalPages);
+
+    res.json({
+      success: true,
+      orderId: result.orderId,
+      pickupCode: result.pickupCode
+    });
+
+  } catch (error) {
+    console.error("❌ Payment verification error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+
+
+
+
 app.get("/", (req, res) => {
   res.json({
     status: "online",
@@ -149,13 +246,13 @@ app.post("/razorpay/verify-payment", async (req, res) => {
 // ============================================================================
 app.post("/create-order", async (req, res) => {
   try {
-    const { printSettings, userId } = req.body;
+    const { printSettings, userId, amount, totalPages } = req.body;
 
     if (!userId) {
       return res.status(400).json({ error: "userId is required" });
     }
 
-    const result = await createOrder(printSettings, userId);
+    const result = await createOrder(printSettings, userId, amount, totalPages);
 
     res.json({
       orderId: result.orderId,
@@ -282,7 +379,13 @@ app.post("/mark-printed", async (req, res) => {
     // Immediately clean up Cloudinary storage after successful print
     const orderDoc = await orderRef.get();
     if (orderDoc.exists) {
+<<<<<<< HEAD
       await cleanupOrder(orderId, orderDoc.data());
+=======
+      const orderData = orderDoc.data();
+      // Delete from Cloudinary but keep metadata in Firestore history
+      await cleanupOrder(orderId, orderData, true); // true = keep metadata
+>>>>>>> 4a92448 (live mode api keys initialization)
     }
 
     console.log(`✅ Order ${orderId} marked as printed`);

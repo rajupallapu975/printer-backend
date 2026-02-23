@@ -18,7 +18,7 @@ async function performCleanup() {
     console.log("🧹 Starting background cleanup task...");
 
     try {
-        const expiryTime = new Date(Date.now() - 12 * 60 * 60 * 1000); 
+        const expiryTime = new Date(Date.now() - 12 * 60 * 60 * 1000);
         // Change 1 min to 12 * 60 * 60 * 1000 for 12 hours in production
 
         const snapshot = await db.collection("orders")
@@ -44,7 +44,7 @@ async function performCleanup() {
 // ============================================================================
 // CLEANUP SINGLE ORDER
 // ============================================================================
-async function cleanupOrder(orderId, orderData) {
+async function cleanupOrder(orderId, orderData, keepMetadata = false) {
     try {
         const publicIds = orderData.publicIds || [];
 
@@ -54,7 +54,6 @@ async function cleanupOrder(orderId, orderData) {
             console.log(`☁️ Deleting ${publicIds.length} files from Cloudinary...`);
 
             for (const publicId of publicIds) {
-
                 // Try deleting as image first
                 let result = await cloudinary.uploader.destroy(publicId, {
                     resource_type: "image"
@@ -71,10 +70,19 @@ async function cleanupOrder(orderId, orderData) {
             }
         }
 
-        // Delete Firestore document
-        await db.collection("orders").doc(orderId).delete();
-
-        console.log(`🗑️ Order ${orderId} fully deleted.`);
+        if (keepMetadata) {
+            // Keep the document but clear file-related data to save space/cost
+            await db.collection("orders").doc(orderId).update({
+                fileUrls: [],
+                publicIds: [],
+                cleanupStatus: "CLEANED"
+            });
+            console.log(`🧹 Cloudinary files for order ${orderId} cleared, metadata kept.`);
+        } else {
+            // Delete Firestore document completely
+            await db.collection("orders").doc(orderId).delete();
+            console.log(`🗑️ Order ${orderId} fully deleted from database.`);
+        }
     } catch (error) {
         console.error(`❌ Failed cleanup for ${orderId}:`, error);
     }
