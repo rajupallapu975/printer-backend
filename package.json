@@ -11,14 +11,7 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
-<<<<<<< HEAD
-    "cloudinary": "^2.9.0",
-    "cors": "^2.8.6",
-    "crypto": "^1.0.1",
-=======
-    "cloudinary": "^2.5.1",
-    "cors": "^2.8.6",
->>>>>>> 4a92448 (live mode api keys initialization)
+
     "dotenv": "^16.4.7",
     "express": "^5.2.1",
     "firebase-admin": "^13.6.0",

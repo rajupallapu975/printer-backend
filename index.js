@@ -379,13 +379,7 @@ app.post("/mark-printed", async (req, res) => {
     // Immediately clean up Cloudinary storage after successful print
     const orderDoc = await orderRef.get();
     if (orderDoc.exists) {
-<<<<<<< HEAD
-      await cleanupOrder(orderId, orderDoc.data());
-=======
-      const orderData = orderDoc.data();
-      // Delete from Cloudinary but keep metadata in Firestore history
-      await cleanupOrder(orderId, orderData, true); // true = keep metadata
->>>>>>> 4a92448 (live mode api keys initialization)
+
     }
 
     console.log(`✅ Order ${orderId} marked as printed`);

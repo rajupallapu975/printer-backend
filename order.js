@@ -53,11 +53,6 @@ async function generateUniquePickupCode() {
    CREATE ORDER
 ================================================= */
 
-<<<<<<< HEAD
-async function createOrder(printSettings, userId, razorpayOrderId = null) {
-=======
-async function createOrder(printSettings, userId, amount = 0, totalPages = 0) {
->>>>>>> 4a92448 (live mode api keys initialization)
   try {
     if (!printSettings || typeof printSettings !== "object") {
       const err = new Error("Invalid printSettings");
@@ -70,15 +65,6 @@ async function createOrder(printSettings, userId, amount = 0, totalPages = 0) {
 
     const orderData = {
       orderId,
-<<<<<<< HEAD
-      userId,
-=======
-      pickupCode,
-      userId,
-      totalPrice: amount,
-      totalPages: totalPages,
-
->>>>>>> 4a92448 (live mode api keys initialization)
       printSettings,
       totalPrice,
       paymentStatus: razorpayOrderId ? "PENDING" : "PAID", // If we have a Razorpay ID, it's pending payment
@@ -108,7 +94,7 @@ async function createOrder(printSettings, userId, amount = 0, totalPages = 0) {
     console.error("❌ CREATE ORDER DB ERROR:", err.message);
     throw err;
   }
-}
+
 
 module.exports = {
   createOrder,
