@@ -1,23 +1,18 @@
-require("dotenv").config();
+// ============================================================================
+// DEPENDENCIES
+// ============================================================================
+require('dotenv').config();
 const express = require("express");
 const cors = require("cors");
 const crypto = require("crypto");
-const cloudinary = require("cloudinary").v2;
 
-// Modular imports
+// ============================================================================
+// INTERNAL MODULES
+// ============================================================================
 const { db, admin } = require("./firebase");
 const razorpayInstance = require("./razorpay");
-const { createOrder, generateUniquePickupCode } = require("./order");
-const { cleanupOrder } = require("./cleanup");
-
-const PORT = process.env.PORT || 5000;
-
-// Cloudinary Initialization
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME || 'dpmpyvmbg',
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET
-});
+const { performCleanup, cleanupOrder } = require("./cleanup");
+const { createOrder, calculateCost, generateUniquePickupCode } = require("./order");
 
 // ============================================================================
 // EXPRESS APP SETUP
@@ -31,6 +26,13 @@ app.use((req, res, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
   next();
 });
+
+// ============================================================================
+// AUTOMATED CLEANUP — runs every 5 minutes, deletes orders older than 24h
+// ============================================================================
+performCleanup();                              // Run once on startup
+setInterval(performCleanup, 5 * 60 * 1000);   // Then every 5 minutes
+
 // ============================================================================
 // ENDPOINT: HEALTH CHECK
 // ============================================================================
@@ -39,22 +41,25 @@ app.get("/", (req, res) => {
     status: "online",
     message: "Printer Backend Server is running",
     razorpay: !!process.env.RAZORPAY_KEY_ID,
-    cloudinary: !!process.env.CLOUDINARY_API_KEY,
-    firebase: !!db
+    firebase: !!db,
+    timestamp: new Date().toISOString(),
   });
 });
+
 // ============================================================================
 // ENDPOINT: CREATE RAZORPAY ORDER
 // ============================================================================
 app.post("/create-razorpay-order", async (req, res, next) => {
   try {
-    const { amount } = req.body;
+    const amount = Number(req.body.amount);
     if (!amount) return res.status(400).json({ error: "Amount is required" });
+
     const options = {
       amount: Math.round(amount * 100), // paise
       currency: "INR",
       receipt: `rcpt_${Date.now()}`
     };
+
     const order = await razorpayInstance.orders.create(options);
     res.json({
       success: true,
@@ -63,9 +68,11 @@ app.post("/create-razorpay-order", async (req, res, next) => {
       key: process.env.RAZORPAY_KEY_ID
     });
   } catch (error) {
+    console.error("❌ Razorpay order creation error:", error);
     next(error);
   }
 });
+
 // ============================================================================
 // ENDPOINT: VERIFY PAYMENT & CREATE DB ORDER
 // ============================================================================
@@ -81,18 +88,21 @@ app.post("/verify-payment", async (req, res, next) => {
       totalPages
     } = req.body;
 
+    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+      return res.status(400).json({ error: "Payment details missing" });
+    }
+
     // Verify Signature
     const body = razorpay_order_id + "|" + razorpay_payment_id;
     const expectedSignature = crypto
       .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
-      .update(body.toString())
-      .digest("hex");
+      .update(body.toString()).digest("hex");
 
     if (expectedSignature !== razorpay_signature) {
       return res.status(400).json({ success: false, error: "Invalid payment signature" });
     }
 
-    // Create Order using modular function
+    // Create Order in Firestore
     const result = await createOrder(
       printSettings,
       razorpay_order_id,
@@ -100,18 +110,18 @@ app.post("/verify-payment", async (req, res, next) => {
       totalPages
     );
 
-    // Update the order with payment info (since createOrder handles the initial save)
+    // Update with payment details
     await db.collection("orders").doc(result.orderId).update({
       userId: userId || 'guest',
       razorpayPaymentId: razorpay_payment_id,
       paymentStatus: "PAID",
-      status: "ACTIVE", // Make it active now that payment is verified
-      pickupCode: await generateUniquePickupCode() // Generate code on successful payment
+      status: "ACTIVE", // Order becomes active after payment
+      pickupCode: await generateUniquePickupCode() // Assign pickup code only after payment
     });
 
-    // Fetch the updated doc to get the code
-    const updatedDoc = await db.collection("orders").doc(result.orderId).get();
-    const finalData = updatedDoc.data();
+    // Get final order data to return code
+    const finalDoc = await db.collection("orders").doc(result.orderId).get();
+    const finalData = finalDoc.data();
 
     res.json({
       success: true,
@@ -119,9 +129,11 @@ app.post("/verify-payment", async (req, res, next) => {
       pickupCode: finalData.pickupCode
     });
   } catch (error) {
+    console.error("❌ Payment verification error:", error);
     next(error);
   }
 });
+
 // ============================================================================
 // ENDPOINT: VERIFY PICKUP CODE (Called by Raspberry Pi)
 // ============================================================================
@@ -129,33 +141,30 @@ app.post("/verify-pickup-code", async (req, res, next) => {
   try {
     const { pickupCode } = req.body;
     if (!pickupCode) return res.status(400).json({ error: "pickupCode required" });
-    console.log(`🔎 Raspberry Pi verifying code: ${pickupCode}`);
-    // Check both 'ACTIVE' and 'active' for backward compatibility
-    let snapshot = await db.collection('orders')
+
+    console.log(`� Raspberry Pi verifying code: ${pickupCode}`);
+
+    const snapshot = await db.collection('orders')
       .where('pickupCode', '==', pickupCode)
       .where('status', '==', 'ACTIVE')
       .limit(1)
       .get();
-    if (snapshot.empty) {
-      snapshot = await db.collection('orders')
-        .where('pickupCode', '==', pickupCode)
-        .where('status', '==', 'active')
-        .limit(1)
-        .get();
-    }
+
     if (snapshot.empty) {
       return res.status(404).json({ success: false, error: "Order not found or expired" });
     }
+
     const doc = snapshot.docs[0];
     const data = doc.data();
-    // Safety checks
+
     if (data.printStatus === 'printed') {
       return res.status(400).json({ error: "Order already printed" });
     }
-    // Check expiry
+
     if (data.expiresAt && data.expiresAt.toDate() < new Date()) {
       return res.status(400).json({ error: "Pickup code has expired" });
     }
+
     res.json({
       success: true,
       orderId: doc.id,
@@ -167,6 +176,7 @@ app.post("/verify-pickup-code", async (req, res, next) => {
     next(error);
   }
 });
+
 // ============================================================================
 // ENDPOINT: MARK AS PRINTED (Cleanup)
 // ============================================================================
@@ -189,14 +199,15 @@ app.post("/mark-printed", async (req, res, next) => {
       pickupCode: null
     });
 
-    // 2. Cleanup Cloudinary Storage using modular cleanup logic
-    await cleanupOrder(orderId, orderData, true); // keepMetadata = true
+    // 2. Cleanup Cloudinary Storage
+    await cleanupOrder(orderId, orderData, true); // true = keep metadata in Firestore
 
     res.json({ success: true, message: "Order processed and cleaned up" });
   } catch (error) {
     next(error);
   }
 });
+
 // ============================================================================
 // ERROR HANDLER
 // ============================================================================
@@ -207,6 +218,20 @@ app.use((err, req, res, next) => {
     error: err.message || "Internal server error"
   });
 });
+
+// ============================================================================
+// START SERVER
+// ============================================================================
+const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
-  console.log(`🚀 Printer Backend active on port ${PORT}`);
+  console.log(`
+╔════════════════════════════════════════════════════════════╗
+║                                                            ║
+║          🖨️  PRINTER BACKEND SERVER ONLINE 🖨️             ║
+║                                                            ║
+║  Port: ${PORT}                                             ║
+║  Time: ${new Date().toLocaleString()}                      ║
+║                                                            ║
+╚════════════════════════════════════════════════════════════╝
+  `);
 });
