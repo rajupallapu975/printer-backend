@@ -61,7 +61,7 @@ async function createOrder(printSettings, razorpayOrderId = null, amount = 0, to
     }
 
     const orderId = generateOrderId();
-    
+
     // Use passed amount/totalPages if provided, otherwise fallback to calculations
     const finalAmount = amount || calculateCost(printSettings);
 
@@ -76,8 +76,8 @@ async function createOrder(printSettings, razorpayOrderId = null, amount = 0, to
       printedAt: null,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       expiresAt: admin.firestore.Timestamp.fromDate(new Date(Date.now() + 24 * 60 * 60 * 1000)), // 24h expiry
-      fileUrls: printSettings.files ? printSettings.files.map(f => f.url) : [],
-      publicIds: printSettings.files ? printSettings.files.map(f => f.publicId).filter(id => id) : [],
+      fileUrls: printSettings.files ? printSettings.files.map(f => f.url).filter(u => u !== undefined) : [],
+      publicIds: printSettings.files ? printSettings.files.map(f => f.publicId).filter(id => id && id !== undefined) : [],
       razorpayOrderId: razorpayOrderId || null,
     };
 

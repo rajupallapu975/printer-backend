@@ -209,6 +209,37 @@ app.post("/mark-printed", async (req, res, next) => {
 });
 
 // ============================================================================
+// ENDPOINT: REFUND PAYMENT
+// ============================================================================
+app.post("/refund-payment", async (req, res, next) => {
+  try {
+    const { razorpay_payment_id, amount } = req.body;
+
+    if (!razorpay_payment_id) {
+      return res.status(400).json({ error: "razorpay_payment_id is required" });
+    }
+
+    console.log(`💸 Processing refund for payment ${razorpay_payment_id}...`);
+
+    const refund = await razorpayInstance.payments.refund(razorpay_payment_id, {
+      amount: Math.round(amount * 100) // Convert to paise
+    });
+
+    res.json({
+      success: true,
+      refundId: refund.id,
+      message: "Refund initiated successfully"
+    });
+  } catch (error) {
+    console.error("❌ Refund error:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message || "Failed to process refund"
+    });
+  }
+});
+
+// ============================================================================
 // ERROR HANDLER
 // ============================================================================
 app.use((err, req, res, next) => {
