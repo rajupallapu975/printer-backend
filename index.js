@@ -34,7 +34,7 @@ performCleanup();                              // Run once on startup
 setInterval(performCleanup, 5 * 60 * 1000);   // Then every 5 minutes
 
 // ============================================================================
-// ENDPOINT: HEALTH CHECK
+// ENDPOINT: HEALTH CHECK & MANUAL CLEANUP
 // ============================================================================
 app.get("/", (req, res) => {
   res.json({
@@ -42,8 +42,26 @@ app.get("/", (req, res) => {
     message: "Printer Backend Server is running",
     razorpay: !!process.env.RAZORPAY_KEY_ID,
     firebase: !!db,
+    cloudinary: !!process.env.CLOUDINARY_CLOUD_NAME,
     timestamp: new Date().toISOString(),
   });
+});
+
+// Manual/Scheduled cleanup trigger
+app.get("/run-cleanup", async (req, res) => {
+  try {
+    const key = req.query.key;
+    // Security check (Optional: add CLEANUP_KEY to your .env)
+    if (process.env.CLEANUP_KEY && key !== process.env.CLEANUP_KEY) {
+      return res.status(401).json({ error: "Unauthorized. Invalid key." });
+    }
+
+    console.log("🚀 Manually triggered cleanup...");
+    const result = await performCleanup();
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 // ============================================================================
