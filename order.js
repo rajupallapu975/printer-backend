@@ -39,10 +39,10 @@ async function generateUniqueXeroxId() {
   while (exists) {
     code = Math.floor(1000 + Math.random() * 9000).toString(); // 4 digits
 
-    // Check in Admin orders (LIVE_ORDER)
-    const snapshot = await dbAdmin.collection("orders")
+    // Check in Customer xerox_orders (ACTIVE)
+    const snapshot = await db.collection("xerox_orders")
       .where("xeroxId", "==", code)
-      .where("status", "==", "LIVE_ORDER")
+      .where("status", "==", "ACTIVE")
       .limit(1)
       .get();
 
@@ -75,7 +75,7 @@ async function generateUniquePickupCode(isXerox = false) {
 /**
  * CREATE ORDER
  */
-async function createOrder(printSettings, razorpayOrderId = null, amount = 0, totalPages = 0, printMode = 'autonomous') {
+async function createOrder(printSettings, razorpayOrderId = null, amount = 0, totalPages = 0, printMode = 'autonomous', userId = 'guest_user') {
   try {
     if (!printSettings || typeof printSettings !== "object") {
       const err = new Error("Invalid printSettings");
@@ -83,8 +83,9 @@ async function createOrder(printSettings, razorpayOrderId = null, amount = 0, to
       throw err;
     }
 
-    const orderId = generateOrderId();
     const isXeroxShop = printMode === 'xeroxShop';
+    const xeroxCode = isXeroxShop ? (printSettings.xeroxCode || await generateUniqueXeroxId()) : null;
+    const orderId = isXeroxShop ? xeroxCode : generateOrderId();
 
     // Select collection in customer DB
     const customerCollection = isXeroxShop ? "xerox_orders" : "orders";
@@ -92,11 +93,13 @@ async function createOrder(printSettings, razorpayOrderId = null, amount = 0, to
     // Use passed amount/totalPages if provided, otherwise fallback to calculations
     const finalAmount = amount || calculateCost(printSettings);
 
+
     const orderData = {
       orderId,
+      userId,
       printSettings,
       amount: finalAmount,
-      printMode, // important for routing logic later
+      printMode,
       totalPages: totalPages || (printSettings.files ? printSettings.files.reduce((sum, f) => sum + (f.pageCount || 1) * (f.copies || 1), 0) : 0),
       paymentStatus: razorpayOrderId ? "PENDING" : "PAID",
       status: razorpayOrderId ? "CREATED" : "ACTIVE",
@@ -107,36 +110,64 @@ async function createOrder(printSettings, razorpayOrderId = null, amount = 0, to
       fileUrls: printSettings.files ? printSettings.files.map(f => f.url).filter(u => u !== undefined) : [],
       publicIds: printSettings.files ? printSettings.files.map(f => f.publicId).filter(id => id && id !== undefined) : [],
       razorpayOrderId: razorpayOrderId || null,
+      xeroxId: xeroxCode,
+      orderCode: xeroxCode, // Unified 4-digit code
+      pickupCode: isXeroxShop ? xeroxCode : null, // Xerox orders use the 4-digit code as pickup code too
     };
 
-    // If it's Xerox Shop, include shopId and generate unique 4-digit ID
+    // If it's Xerox Shop, include shopId
     if (isXeroxShop) {
       if (printSettings.shopId) orderData.shopId = printSettings.shopId;
-      orderData.xeroxId = await generateUniqueXeroxId();
     }
 
-    // If it's already paid (direct create), generate code now
-    if (!razorpayOrderId) {
-      orderData.pickupCode = await generateUniquePickupCode(isXeroxShop);
+    // Generate pickup code for autonomous ONLY (Xerox already set above)
+    if (!razorpayOrderId && !isXeroxShop) {
+      orderData.pickupCode = await generateUniquePickupCode(false);
     }
 
     // ⚡ DOUBLE WRITE LOGIC
-    // 1. Write to Customer Project (main tracking)
     await db.collection(customerCollection).doc(orderId).set(orderData);
 
-    // 2. Write to Admin Project (if xeroxShop)
-    if (isXeroxShop) {
-      // Admin project uses 'orders' collection exclusively for their dashboard
-      await dbAdmin.collection("orders").doc(orderId).set({
-        ...orderData,
-        status: razorpayOrderId ? "PAYMENT_PENDING" : "LIVE_ORDER",
-      });
+    if (isXeroxShop && printSettings.shopId) {
+      const shopId = printSettings.shopId;
+      const shopDoc = await dbAdmin.collection("shops").doc(shopId).get();
+
+      if (shopDoc.exists) {
+        const adminOrderData = {
+          id: orderId,
+          customerName: userId || 'Guest',
+          fileName: printSettings.files && printSettings.files.length > 0 ? printSettings.files[0].fileName : 'document.pdf',
+          bwPages: printSettings.files ? printSettings.files.reduce((sum, f) => sum + (f.color === 'BW' ? (f.pageCount || 1) * (f.copies || 1) : 0), 0) : 0,
+          colorPages: printSettings.files ? printSettings.files.reduce((sum, f) => sum + (f.color === 'COLOR' ? (f.pageCount || 1) * (f.copies || 1) : 0), 0) : 0,
+          isDuplex: printSettings.files ? printSettings.files.some(f => f.duplex) : false,
+          status: razorpayOrderId ? 'payment_pending' : 'pending',
+          paymentStatus: razorpayOrderId ? 'pending' : 'done',
+          amount: finalAmount,
+          timestamp: admin.firestore.FieldValue.serverTimestamp(),
+          fileUrls: orderData.fileUrls || [],
+          fileUrl: orderData.fileUrls && orderData.fileUrls.length > 0 ? orderData.fileUrls[0] : null,
+          orderId: orderId,
+          orderCode: xeroxCode, // This is the 4-digit ID
+          xeroxId: xeroxCode,
+          pickupCode: xeroxCode, // Mirror Xerox ID as pickup code for admin side too
+          shopId: shopId,
+          // Sync Critical Print Specs
+          copies: printSettings.files && printSettings.files.length > 0 ? (printSettings.files[0].copies || 1) : 1,
+          numCopies: printSettings.files && printSettings.files.length > 0 ? (printSettings.files[0].copies || 1) : 1,
+          orientation: printSettings.files && printSettings.files.length > 0 ? (printSettings.files[0].orientation || 'portrait') : 'portrait',
+          layout: printSettings.files && printSettings.files.length > 0 ? (printSettings.files[0].orientation || 'portrait') : 'portrait',
+        };
+        await dbAdmin.collection("shops").doc(shopId).collection("orders").doc(orderId).set(adminOrderData);
+      } else {
+        console.error(`❌ Security Alert: ShopId ${shopId} does not exist. Order ${orderId} aborted for Admin Sync.`);
+      }
     }
 
     return {
       orderId,
       pickupCode: orderData.pickupCode || null,
-      xeroxId: orderData.xeroxId || null,
+      xeroxId: xeroxCode,
+      orderCode: xeroxCode,
       amount: finalAmount
     };
 

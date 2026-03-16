@@ -28,11 +28,11 @@ app.use((req, res, next) => {
   next();
 });
 
-// ============================================================================
-// AUTOMATED CLEANUP — runs every 5 minutes, deletes orders older than 24h
-// ============================================================================
-performCleanup();                              // Run once on startup
-setInterval(performCleanup, 5 * 60 * 1000);   // Then every 5 minutes
+// Consolidated scheduling moved or updated here
+// Run cleanup once on startup then every 5 minutes
+// performCleanup is already imported on line 14
+performCleanup();
+setInterval(performCleanup, 5 * 60 * 1000);
 
 // ============================================================================
 // ENDPOINT: HEALTH CHECK & MANUAL CLEANUP
@@ -79,9 +79,13 @@ app.get("/get-xerox-shops", async (req, res, next) => {
       return res.json({ success: true, shops: [] });
     }
 
-    const shops = snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
+    const shops = await Promise.all(snapshot.docs.map(async doc => {
+      const printersSnapshot = await doc.ref.collection("printers").where("isOnline", "==", true).get();
+      return {
+        id: doc.id,
+        ...doc.data(),
+        activePrinters: printersSnapshot.size
+      };
     }));
 
     res.json({
@@ -161,28 +165,36 @@ app.post("/verify-payment", async (req, res, next) => {
       razorpay_order_id,
       amount,
       totalPages,
-      printMode
+      printMode,
+      userId || 'guest_user'
     );
 
     const isXeroxShop = printMode === 'xeroxShop';
     const mainCollection = isXeroxShop ? "xerox_orders" : "orders";
 
     // Update with payment details in Customer DB
-    await db.collection(mainCollection).doc(result.orderId).update({
-      userId: userId || 'guest',
+    const updateData = {
+      userId: userId || 'guest_user',
       razorpayPaymentId: razorpay_payment_id,
       paymentStatus: "PAID",
       status: "ACTIVE",
-      pickupCode: await generateUniquePickupCode(isXeroxShop) // Pass mode to helper
-    });
+    };
+
+    // 🛡️ Only generate code if NOT a Xerox shop
+    if (!isXeroxShop) {
+      updateData.pickupCode = await generateUniquePickupCode(false);
+    }
+
+    await db.collection(mainCollection).doc(result.orderId).update(updateData);
 
     // If Xerox Shop, sync with Admin Project
-    if (isXeroxShop) {
-      await dbAdmin.collection("orders").doc(result.orderId).update({
-        userId: userId || 'guest',
+    if (isXeroxShop && printSettings.shopId) {
+      const shopId = printSettings.shopId;
+      await dbAdmin.collection("shops").doc(shopId).collection("orders").doc(result.orderId).update({
+        userId: userId || 'guest_user',
         razorpayPaymentId: razorpay_payment_id,
-        paymentStatus: "PAID",
-        status: "LIVE_ORDER",
+        paymentStatus: "done",
+        status: "pending",
         pickupCode: result.pickupCode
       });
     }
@@ -195,7 +207,8 @@ app.post("/verify-payment", async (req, res, next) => {
       success: true,
       orderId: result.orderId,
       pickupCode: finalData.pickupCode,
-      xeroxId: finalData.xeroxId || null
+      xeroxId: finalData.xeroxId || null,
+      orderCode: finalData.orderCode || null
     });
   } catch (error) {
     console.error("❌ Payment verification error:", error);
@@ -219,7 +232,7 @@ app.post("/complete-order", async (req, res, next) => {
     let finalFileUrls = fileUrls || [];
     let originalFileUrls = fileUrls || [];
 
-    // If Xerox, apply watermark
+    // If Xerox, apply watermark and CLEANUP original files (if necessary)
     if (isXeroxShop) {
       const orderDoc = await db.collection("xerox_orders").doc(orderId).get();
       const orderData = orderDoc.data();
@@ -227,34 +240,50 @@ app.post("/complete-order", async (req, res, next) => {
       if (orderData && orderData.xeroxId && finalFileUrls.length > 0) {
         console.log(`💧 Watermarking Xerox Order ${orderId} with ID ${orderData.xeroxId}`);
         try {
+          // Watermarking service will overwrite the original files in Account B
           finalFileUrls = await Promise.all(
-            finalFileUrls.map(url => applyWatermark(url, orderData.xeroxId))
+            finalFileUrls.map((url, index) => applyWatermark(url, orderData.xeroxId, index + 1))
           );
+          
+          console.log(`✅ ${finalFileUrls.length} files watermarked for Order ${orderId}`);
         } catch (wmErr) {
-          console.error("⚠️ Watermarking failed in complete-order:", wmErr.message);
+          console.error("❌ Watermarking failed in complete-order:", wmErr.message);
         }
+      } else {
+        console.warn(`⚠️ Watermarking skipped for Order ${orderId}: Missing data ${!!orderData}, ID ${orderData?.xeroxId}, Files ${finalFileUrls.length}`);
       }
     }
 
     // Update main order (Customer DB)
-    await db.collection(mainCollection).doc(orderId).update({
+    const dbUpdate = {
       fileUrls: finalFileUrls,
-      originalFileUrls: originalFileUrls,
       publicIds: publicIds || [],
       localFilePaths: localFilePaths || [],
       status: 'ACTIVE',
       updatedAt: admin.firestore.FieldValue.serverTimestamp()
-    });
+    };
+
+    // Only keep original URLs for non-Xerox orders (Xerox originals are deleted)
+    if (!isXeroxShop) {
+      dbUpdate.originalFileUrls = originalFileUrls;
+    }
+
+    await db.collection(mainCollection).doc(orderId).update(dbUpdate);
 
     // If Xerox, update Admin project too
     if (isXeroxShop) {
-      await dbAdmin.collection("orders").doc(orderId).update({
-        fileUrls: finalFileUrls,
-        originalFileUrls: originalFileUrls,
-        publicIds: publicIds || [],
-        status: 'LIVE_ORDER',
-        updatedAt: admin.firestore.FieldValue.serverTimestamp()
-      });
+      const orderDoc = await db.collection("xerox_orders").doc(orderId).get();
+      const orderData = orderDoc.data();
+      const shopId = orderData ? orderData.shopId : null;
+
+      if (shopId) {
+        await dbAdmin.collection("shops").doc(shopId).collection("orders").doc(orderId).update({
+          fileUrls: finalFileUrls,
+          fileUrl: finalFileUrls.length > 0 ? finalFileUrls[0] : null,
+          status: 'pending',
+          updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+      }
     }
 
     res.json({ success: true, message: "Order completed and files attached" });
@@ -315,14 +344,26 @@ app.post("/mark-printed", async (req, res, next) => {
     const { orderId } = req.body;
     if (!orderId) return res.status(400).json({ error: "orderId required" });
 
-    const orderRef = db.collection('orders').doc(orderId);
-    const doc = await orderRef.get();
-    if (!doc.exists) return res.status(404).json({ error: "Order not found" });
+    // Try to find in both collections
+    const collections = ["orders", "xerox_orders"];
+    let orderData = null;
+    let foundCol = null;
 
-    const orderData = doc.data();
+    for (const col of collections) {
+      const doc = await db.collection(col).doc(orderId).get();
+      if (doc.exists) {
+        orderData = doc.data();
+        foundCol = col;
+        break;
+      }
+    }
+
+    if (!orderData) return res.status(404).json({ error: "Order not found in any collection" });
+
+    console.log(`✅ Marking order ${orderId} as printed from ${foundCol}...`);
 
     // 1. Mark as completed and revoke code
-    await orderRef.update({
+    await db.collection(foundCol).doc(orderId).update({
       status: 'completed',
       printStatus: 'printed',
       printedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -330,10 +371,13 @@ app.post("/mark-printed", async (req, res, next) => {
     });
 
     // 2. Cleanup Cloudinary Storage
-    await cleanupOrder(orderId, orderData, true); // true = keep metadata in Firestore
+    // We pass the collection name so it knows which config to use if needed
+    const { cleanupOrder } = require("./cleanup");
+    await cleanupOrder(orderId, orderData, foundCol, true); // true = keep metadata in Firestore
 
-    res.json({ success: true, message: "Order processed and cleaned up" });
+    res.json({ success: true, message: `Order ${orderId} in ${foundCol} processed and cleaned up` });
   } catch (error) {
+    console.error("❌ mark-printed error:", error);
     next(error);
   }
 });
@@ -379,6 +423,8 @@ app.use((err, req, res, next) => {
     error: err.message || "Internal server error"
   });
 });
+
+// Note: Scheduled cleanup consolidated at the top of the file
 
 // ============================================================================
 // START SERVER

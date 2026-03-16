@@ -7,7 +7,7 @@ const cloudinary = require('cloudinary').v2;
 /**
  * Adds a 4-digit watermark ID to the bottom-right of a PDF or Image
  */
-async function applyWatermark(fileUrl, xeroxId) {
+async function applyWatermark(fileUrl, xeroxId, index = 1) {
     try {
         // Ensure environment is loaded
         if (!process.env.PORT) require('dotenv').config();
@@ -24,7 +24,7 @@ async function applyWatermark(fileUrl, xeroxId) {
         // Apply config right before use
         cloudinary.config(activeConfig);
 
-        console.log(`💧 Watermarking: ${xeroxId} | Account: ${activeConfig.cloud_name}`);
+        console.log(`💧 Watermarking: ${xeroxId} | File #${index} | Account: ${activeConfig.cloud_name}`);
         console.log(`🔗 Target: ${fileUrl}`);
 
         // 1. Download the file
@@ -42,29 +42,29 @@ async function applyWatermark(fileUrl, xeroxId) {
 
             for (const page of pages) {
                 const { width, height } = page.getSize();
-                // Bottom-right corner, very small (8pt)
-                page.drawText(xeroxId.toString(), {
-                    x: width - 35, // Moved closer to edge
-                    y: 10,        // Lowered
-                    size: 8,      // Smaller font
+                // Bottom-right corner (Black text, slightly inset for safety)
+                page.drawText(`${xeroxId}`, {
+                    x: width - 70, 
+                    y: 30,
+                    size: 14, // Clear but not overbearing
                     font: helveticaFont,
-                    color: rgb(0.5, 0.5, 0.5), // Grey to be subtle
-                    opacity: 0.7,
+                    color: rgb(0, 0, 0), // Pure Black for maximum compatibility
+                    opacity: 0.8,
                 });
             }
             processedBuffer = Buffer.from(await pdfDoc.save());
         }
         else {
             // --- IMAGE PROCESSING (Sharp) ---
-            // Create a very small SVG overlay
             const textSvg = `
-                <svg width="100" height="40">
-                    <text x="50" y="30" font-family="Arial" font-size="14" font-weight="bold" fill="rgba(128,128,128,0.6)" text-anchor="middle">
-                        ID: ${xeroxId}
+                <svg width="200" height="60">
+                    <text x="180" y="45" font-family="Arial" font-size="24" font-weight="bold" fill="rgba(0,0,0,0.8)" text-anchor="end">
+                        #${xeroxId}
                     </text>
                 </svg>`;
 
             processedBuffer = await sharp(buffer)
+                .jpeg({ quality: 90 }) // Force JPEG for consistency
                 .composite([{
                     input: Buffer.from(textSvg),
                     gravity: 'southeast',
@@ -73,13 +73,17 @@ async function applyWatermark(fileUrl, xeroxId) {
                 .toBuffer();
         }
 
-        // 3. Upload Watermarked Version to Cloudinary
+        const isPdfType = contentType.includes('pdf');
+
+        // 3. Upload Watermarked Version to Cloudinary (Professional Folders)
         const result = await new Promise((resolve, reject) => {
             const uploadStream = cloudinary.uploader.upload_stream(
                 {
-                    folder: 'watermarked_orders',
-                    resource_type: 'auto',
-                    public_id: `wm_${Date.now()}`
+                    folder: `orders/${xeroxId}`,
+                    resource_type: isPdfType ? 'image' : 'image', // Consistent with frontend
+                    public_id: `${xeroxId}_${index}`,
+                    overwrite: true,
+                    invalidate: true // Force CDN refresh
                 },
                 (error, result) => {
                     if (error) reject(error);
@@ -89,6 +93,7 @@ async function applyWatermark(fileUrl, xeroxId) {
             uploadStream.end(processedBuffer);
         });
 
+        console.log(`✅ Watermark Success: ${result.secure_url}`);
         return result.secure_url;
 
     } catch (err) {
