@@ -229,35 +229,42 @@ app.post("/complete-order", async (req, res, next) => {
     const isXeroxShop = printMode === 'xeroxShop';
     const mainCollection = isXeroxShop ? "xerox_orders" : "orders";
 
+    let watermarkedResults = [];
     let finalFileUrls = fileUrls || [];
+    let finalPublicIds = publicIds || [];
     let originalFileUrls = fileUrls || [];
 
-    // If Xerox, apply watermark and CLEANUP original files (if necessary)
+    // If Xerox, apply watermark and track new public IDs
     if (isXeroxShop) {
       const orderDoc = await db.collection("xerox_orders").doc(orderId).get();
       const orderData = orderDoc.data();
 
-      if (orderData && orderData.xeroxId && finalFileUrls.length > 0) {
-        console.log(`💧 Watermarking Xerox Order ${orderId} with ID ${orderData.xeroxId}`);
+      if (orderData && orderData.orderCode && finalFileUrls.length > 0) {
+        const displayCode = orderData.orderCode; 
+        console.log(`💧 Watermarking Xerox Order ${orderId} with code ${displayCode}`);
         try {
-          // Watermarking service will overwrite the original files in Account B
-          finalFileUrls = await Promise.all(
-            finalFileUrls.map((url, index) => applyWatermark(url, orderData.xeroxId, index + 1))
+          // New: applyWatermark now returns { url, publicId }
+          watermarkedResults = await Promise.all(
+            finalFileUrls.map((url, index) => applyWatermark(url, displayCode, index + 1))
           );
+          
+          finalFileUrls = watermarkedResults.map(r => r.url);
+          // Only update publicIds if we got new ones from the watermark service
+          finalPublicIds = watermarkedResults.map((r, i) => r.publicId || finalPublicIds[i]);
           
           console.log(`✅ ${finalFileUrls.length} files watermarked for Order ${orderId}`);
         } catch (wmErr) {
           console.error("❌ Watermarking failed in complete-order:", wmErr.message);
         }
       } else {
-        console.warn(`⚠️ Watermarking skipped for Order ${orderId}: Missing data ${!!orderData}, ID ${orderData?.xeroxId}, Files ${finalFileUrls.length}`);
+        console.warn(`⚠️ Watermarking skipped: Missing data ${!!orderData}, Code ${orderData?.orderCode}, Files ${finalFileUrls.length}`);
       }
     }
 
     // Update main order (Customer DB)
     const dbUpdate = {
       fileUrls: finalFileUrls,
-      publicIds: publicIds || [],
+      publicIds: finalPublicIds || [],
       localFilePaths: localFilePaths || [],
       status: 'ACTIVE',
       updatedAt: admin.firestore.FieldValue.serverTimestamp()
@@ -362,22 +369,53 @@ app.post("/mark-printed", async (req, res, next) => {
 
     console.log(`✅ Marking order ${orderId} as printed from ${foundCol}...`);
 
-    // 1. Mark as completed and revoke code
+    // 1. Mark printing as done but KEEP order active for customer pickup
     await db.collection(foundCol).doc(orderId).update({
-      status: 'completed',
+      orderStatus: 'printing completed',
       printStatus: 'printed',
       printedAt: admin.firestore.FieldValue.serverTimestamp(),
-      pickupCode: null
     });
 
-    // 2. Cleanup Cloudinary Storage
-    // We pass the collection name so it knows which config to use if needed
-    const { cleanupOrder } = require("./cleanup");
-    await cleanupOrder(orderId, orderData, foundCol, true); // true = keep metadata in Firestore
-
-    res.json({ success: true, message: `Order ${orderId} in ${foundCol} processed and cleaned up` });
+    res.json({ success: true, message: `Order ${orderId} in ${foundCol} processed.` });
   } catch (error) {
     console.error("❌ mark-printed error:", error);
+    next(error);
+  }
+});
+
+// ============================================================================
+// ENDPOINT: MARK AS DELIVERED (Final Archival)
+// ============================================================================
+app.post("/mark-delivered", async (req, res, next) => {
+  try {
+    const { orderId, shopId } = req.body;
+    if (!orderId) return res.status(400).json({ error: "orderId required" });
+
+    console.log(`📦 Finalizing Delivery for Order ${orderId} at Shop ${shopId}...`);
+
+    // 1. Update Customer Project (xerox_orders)
+    await db.collection("xerox_orders").doc(orderId).update({
+      status: 'completed',
+      orderStatus: 'order completed',
+      isPicked: true,
+      orderDone: true,
+      deliveredAt: admin.firestore.FieldValue.serverTimestamp(),
+    }).catch(e => console.error(`⚠️ Customer project update failed: ${e.message}`));
+
+    // 2. Update Admin Project Mirror (shops/{shopId}/orders/{orderId})
+    if (shopId) {
+      await dbAdmin.collection("shops").doc(shopId).collection("orders").doc(orderId).update({
+        status: 'completed',
+        orderStatus: 'order completed',
+        isPicked: true,
+        orderDone: true,
+        deliveredAt: admin.firestore.FieldValue.serverTimestamp(),
+      }).catch(e => console.error(`⚠️ Admin project mirror update failed: ${e.message}`));
+    }
+
+    res.json({ success: true, message: `Order ${orderId} marked as DELIVERED in both projects.` });
+  } catch (error) {
+    console.error("❌ mark-delivered error:", error);
     next(error);
   }
 });

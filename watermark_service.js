@@ -40,25 +40,26 @@ async function applyWatermark(fileUrl, xeroxId, index = 1) {
             const helveticaFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
             const pages = pdfDoc.getPages();
 
-            for (const page of pages) {
+            pages.forEach((page, i) => {
                 const { width, height } = page.getSize();
                 // Bottom-right corner (Black text, slightly inset for safety)
-                page.drawText(`${xeroxId}`, {
-                    x: width - 70, 
-                    y: 30,
-                    size: 14, // Clear but not overbearing
+                page.drawText(`#${xeroxId}`, {
+                    x: width - 85, 
+                    y: 25,
+                    size: 15, // Slightly larger for better visibility
                     font: helveticaFont,
-                    color: rgb(0, 0, 0), // Pure Black for maximum compatibility
-                    opacity: 0.8,
+                    color: rgb(0, 0, 0), // Pure Black
+                    opacity: 0.85,
                 });
-            }
+            });
+            console.log(`   📄 PDF watermarked: ${pages.length} pages`);
             processedBuffer = Buffer.from(await pdfDoc.save());
         }
         else {
             // --- IMAGE PROCESSING (Sharp) ---
             const textSvg = `
-                <svg width="200" height="60">
-                    <text x="180" y="45" font-family="Arial" font-size="24" font-weight="bold" fill="rgba(0,0,0,0.8)" text-anchor="end">
+                <svg width="400" height="100">
+                    <text x="380" y="75" font-family="Arial" font-size="42" font-weight="bold" fill="rgba(0,0,0,0.8)" text-anchor="end">
                         #${xeroxId}
                     </text>
                 </svg>`;
@@ -71,20 +72,25 @@ async function applyWatermark(fileUrl, xeroxId, index = 1) {
                     blend: 'over'
                 }])
                 .toBuffer();
+            console.log(`   🖼️ Image watermarked: #${xeroxId}`);
         }
 
-        const isPdfType = contentType.includes('pdf');
+        const isPdfType = contentType.toLowerCase().includes('pdf');
 
         // 3. Upload Watermarked Version to Cloudinary (Professional Folders)
         const result = await new Promise((resolve, reject) => {
+            const uploadOptions = {
+                folder: `orders/${xeroxId}`,
+                // Using 'image' for PDFs allows Cloudinary to treat it as a document (v/s 'raw')
+                resource_type: isPdfType ? 'image' : 'image', 
+                format: isPdfType ? 'pdf' : 'jpg',
+                public_id: `${xeroxId}_${index}`,
+                overwrite: true,
+                invalidate: true // Force CDN refresh
+            };
+
             const uploadStream = cloudinary.uploader.upload_stream(
-                {
-                    folder: `orders/${xeroxId}`,
-                    resource_type: isPdfType ? 'image' : 'image', // Consistent with frontend
-                    public_id: `${xeroxId}_${index}`,
-                    overwrite: true,
-                    invalidate: true // Force CDN refresh
-                },
+                uploadOptions,
                 (error, result) => {
                     if (error) reject(error);
                     else resolve(result);
@@ -93,12 +99,25 @@ async function applyWatermark(fileUrl, xeroxId, index = 1) {
             uploadStream.end(processedBuffer);
         });
 
-        console.log(`✅ Watermark Success: ${result.secure_url}`);
-        return result.secure_url;
+        console.log(`✅ Watermark Success: ${result.secure_url} (${result.public_id}) | 💾 Size: ${processedBuffer.length} bytes`);
+        
+        // Ensure the returned URL has the extension for better app-side recognition
+        let finalUrl = result.secure_url;
+        const ext = isPdfType ? '.pdf' : '.jpg';
+        if (!finalUrl.toLowerCase().endsWith(ext)) {
+            finalUrl = `${finalUrl}${ext}`;
+        }
+
+        return { 
+            url: finalUrl, 
+            publicId: result.public_id 
+        };
 
     } catch (err) {
         console.error("❌ Watermark processing failed:", err.message);
-        return fileUrl; // Fallback to original if processing fails
+        console.error(err.stack); // Added more trace
+        // Return original in same format for consistency
+        return { url: fileUrl, publicId: null };
     }
 }
 

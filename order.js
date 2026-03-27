@@ -103,16 +103,15 @@ async function createOrder(printSettings, razorpayOrderId = null, amount = 0, to
       totalPages: totalPages || (printSettings.files ? printSettings.files.reduce((sum, f) => sum + (f.pageCount || 1) * (f.copies || 1), 0) : 0),
       paymentStatus: razorpayOrderId ? "PENDING" : "PAID",
       status: razorpayOrderId ? "CREATED" : "ACTIVE",
-      printStatus: "pending",
-      printedAt: null,
+      orderStatus: isXeroxShop ? "not printed yet" : null,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       expiresAt: admin.firestore.Timestamp.fromDate(new Date(Date.now() + 24 * 60 * 60 * 1000)), // 24h expiry
       fileUrls: printSettings.files ? printSettings.files.map(f => f.url).filter(u => u !== undefined) : [],
-      publicIds: printSettings.files ? printSettings.files.map(f => f.publicId).filter(id => id && id !== undefined) : [],
+      publicIds: isXeroxShop ? [] : (printSettings.files ? printSettings.files.map(f => f.publicId).filter(id => id && id !== undefined) : []),
       razorpayOrderId: razorpayOrderId || null,
-      xeroxId: xeroxCode,
-      orderCode: xeroxCode, // Unified 4-digit code
-      pickupCode: isXeroxShop ? xeroxCode : null, // Xerox orders use the 4-digit code as pickup code too
+      xeroxId: isXeroxShop ? (printSettings.shopId || xeroxCode) : null, // Store Firestore shop doc ID so QR scan matches
+      orderCode: xeroxCode, // 4-digit display code
+      pickupCode: isXeroxShop ? xeroxCode : null, // 4-digit pickup code shown to customer
     };
 
     // If it's Xerox Shop, include shopId
@@ -147,9 +146,9 @@ async function createOrder(printSettings, razorpayOrderId = null, amount = 0, to
           fileUrls: orderData.fileUrls || [],
           fileUrl: orderData.fileUrls && orderData.fileUrls.length > 0 ? orderData.fileUrls[0] : null,
           orderId: orderId,
-          orderCode: xeroxCode, // This is the 4-digit ID
-          xeroxId: xeroxCode,
-          pickupCode: xeroxCode, // Mirror Xerox ID as pickup code for admin side too
+          orderCode: xeroxCode, // 4-digit display code
+          xeroxId: shopId, // Firestore shop doc ID (matches QR)
+          pickupCode: xeroxCode, // 4-digit pickup code
           shopId: shopId,
           // Sync Critical Print Specs
           copies: printSettings.files && printSettings.files.length > 0 ? (printSettings.files[0].copies || 1) : 1,
@@ -166,8 +165,8 @@ async function createOrder(printSettings, razorpayOrderId = null, amount = 0, to
     return {
       orderId,
       pickupCode: orderData.pickupCode || null,
-      xeroxId: xeroxCode,
-      orderCode: xeroxCode,
+      xeroxId: orderData.xeroxId, // Firestore shop doc ID
+      orderCode: xeroxCode, // 4-digit display code
       amount: finalAmount
     };
 
