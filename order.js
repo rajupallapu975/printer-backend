@@ -8,16 +8,29 @@ function generateOrderId() {
 /**
  * Calculate cost based on print settings
  * Color: ₹10 per page
- * B/W: ₹3 per page
+ * B/W (Single): ₹2 per page
+ * B/W (Double): ₹3 per sheet (2 pages)
  */
 function calculateCost(printSettings) {
   let total = 0;
   if (!printSettings.files || !Array.isArray(printSettings.files)) return 0;
   for (const file of printSettings.files) {
-    const unitPrice = file.color === "COLOR" ? 10 : 3;
     const pages = file.pageCount || 1;
     const copies = file.copies || 1;
-    total += unitPrice * pages * copies;
+    const isColor = file.color === "COLOR";
+    const isDoubleSided = !!(file.doubleSided || file.duplex);
+
+    if (isColor) {
+      total += 10 * pages * copies;
+    } else {
+      if (isDoubleSided && pages >= 2) {
+        const doubleSheets = Math.floor(pages / 2);
+        const singlePages = pages % 2;
+        total += (doubleSheets * 3 + singlePages * 2) * copies;
+      } else {
+        total += 2 * pages * copies;
+      }
+    }
   }
   return total;
 }
@@ -59,7 +72,7 @@ async function generateUniquePickupCode(isXerox = false) {
 /**
  * CREATE ORDER
  */
-async function createOrder(printSettings, razorpayOrderId = null, amount = 0, totalPages = 0, printMode = 'autonomous', userId = 'guest_user', customId = null) {
+async function createOrder(printSettings, razorpayOrderId = null, amount = 0, totalPages = 0, printMode = 'autonomous', userId = 'guest_user', customId = null, userEmail = null) {
   try {
     if (!printSettings || typeof printSettings !== "object") {
       const err = new Error("Invalid printSettings");
@@ -78,6 +91,7 @@ async function createOrder(printSettings, razorpayOrderId = null, amount = 0, to
     const orderData = {
       orderId,
       userId,
+      userEmail: userEmail || userId, // Display email in Admin App
       printSettings,
       amount: finalAmount,
       printMode,
@@ -193,11 +207,11 @@ async function syncOrderToAdmin(orderId, isXeroxShop = true, watermarkedResults 
 
     const adminOrderData = {
       id: orderId,
-      customerName: userId || 'Guest',
+      customerName: orderDocData.userEmail || userId || 'Guest',
       fileName: displayFileNames[0],
       bwPages: printSettings.files ? printSettings.files.reduce((sum, f) => sum + (f.color === 'BW' ? (f.pageCount || 1) * (f.copies || 1) : 0), 0) : 0,
       colorPages: printSettings.files ? printSettings.files.reduce((sum, f) => sum + (f.color === 'COLOR' ? (f.pageCount || 1) * (f.copies || 1) : 0), 0) : 0,
-      isDuplex: printSettings.files ? printSettings.files.some(f => f.duplex) : false,
+      isDuplex: printSettings.files ? printSettings.files.some(f => f.doubleSided || f.duplex || f.doubleSide) : false,
       status: 'pending',
       paymentStatus: 'done',
       amount: finalAmount,

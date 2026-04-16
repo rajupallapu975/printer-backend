@@ -62,6 +62,11 @@ async function performCleanup() {
             console.log(`[${new Date().toISOString()}] ✨ Cleanup finished. Processed ${totalProcessed}/${totalFound} orders in ${duration}s.`);
         }
 
+        // 🕵️ EXTRA: Deep Orphaned cleanup (Rare, once per cycle)
+        if (Math.random() < 0.1) { // 10% chance to trigger deep cleanup during regular task
+            await cleanupOrphanedCloudinaryAssets().catch(() => null);
+        }
+
         return { success: true, processed: totalProcessed, total: totalFound };
 
     } catch (error) {
@@ -73,83 +78,44 @@ async function performCleanup() {
 async function deleteOrderFilesFromCloudinary(orderId, orderData, colName) {
     const publicIds = orderData.publicIds || [];
     const toDeleteIds = [];
+    const displayCode = orderData.pickupCode || orderData.orderCode || orderData.id;
+    console.log(`🔍 [${orderId}] Cleanup Check: publicIds=[${publicIds.join(', ')}], code=${displayCode}`);
 
-    // 🛡️ Safety check: Only delete if no OTHER order references these publicIds
+    // 1️⃣ ID-BASED PURGE (Legacy/Standard)
     if (publicIds.length > 0) {
-        console.log(`🔍 Checking sharing status for ${publicIds.length} files of order ${orderId}...`);
-
         for (const pid of publicIds) {
             let isShared = false;
             const collections = ["orders", "xerox_orders"];
-            
             for (const cn of collections) {
-                const sharingOrders = await db.collection(cn)
-                    .where("publicIds", "array-contains", pid)
-                    .limit(2)
-                    .get();
-                
-                // If shared with anyone other than itself (if in same collection) or anyone in other collection
-                if (cn === colName) {
-                    if (sharingOrders.size > 1) { isShared = true; break; }
-                } else {
-                    if (sharingOrders.size > 0) { isShared = true; break; }
-                }
+                const sharingOrders = await db.collection(cn).where("publicIds", "array-contains", pid).limit(2).get();
+                if (cn === colName) { if (sharingOrders.size > 1) { isShared = true; break; } }
+                else { if (sharingOrders.size > 0) { isShared = true; break; } }
             }
+            if (!isShared) toDeleteIds.push(pid);
+        }
+    }
 
-            if (!isShared) {
-                toDeleteIds.push(pid);
-            } else {
-                console.log(`♻️ Skipping deletion for ${pid} - shared with other orders.`);
-            }
+    // 2️⃣ PREFIX-BASED PURGE (Aggressive - catches untracked files like "602862_1" or "file")
+    const isXerox = orderData.printMode === 'xeroxShop' || colName === 'xerox_orders';
+    cloudinary.config(isXerox ? configB : configA);
+
+    if (displayCode) {
+        const foldersToTry = ["xerox_orders", "xerox_processed_orders", "xerox_shop"];
+        for (const prefix of foldersToTry) {
+            const folderPath = `${prefix}/${displayCode}`;
+            console.log(`🧹 Attempting prefix-wipe for: ${folderPath}`);
+            await cloudinary.api.delete_resources_by_prefix(folderPath).catch(() => null);
+            await cloudinary.api.delete_folder(folderPath).catch(() => null);
+            
+            // Catch root files like "xerox_processed_orders/602862_1"
+            await cloudinary.api.delete_resources_by_prefix(`${prefix}/${displayCode}`).catch(() => null);
         }
     }
 
     if (toDeleteIds.length > 0) {
-        console.log(`🗑️ Deleting ${toDeleteIds.length}/${publicIds.length} files from Cloudinary for ${orderId}...`);
-
-        // ⚡ SWITCH TO CORRECT ACCOUNT FOR DELETION
-        const isXerox = orderData.printMode === 'xeroxShop' || colName === 'xerox_orders';
-        cloudinary.config(isXerox ? configB : configA);
-
-        // Delete as image
-        const imgRes = await cloudinary.api.delete_resources(toDeleteIds, { resource_type: 'image' });
-        // Delete as raw (for PDFs/Docs)
-        const rawRes = await cloudinary.api.delete_resources(toDeleteIds, { resource_type: 'raw' });
-
-        console.log(`✅ Cloudinary ${isXerox ? 'B' : 'A'} result for ${orderId}:`, {
-            images: imgRes.deleted,
-            raw: rawRes.deleted
-        });
-
-        // 📂 CLEANUP EMPTY FOLDERS (As requested to avoid confusion)
-        // Folders can only be deleted if they are empty
-        try {
-            // Determine potential folder paths
-            const code = orderData.pickupCode || orderData.orderCode;
-            const pathPrefix = "xerox_orders"; // Unified Storage Path
-
-            if (code && code !== '000000') {
-                const folderPath = `${pathPrefix}/${code}`;
-                console.log(`📁 Attempting to remove Cloudinary folder: ${folderPath}`);
-                
-                // We wait a tiny bit to ensure resources are fully purged from CDN
-                await new Promise(r => setTimeout(r, 1000));
-                
-                await cloudinary.api.delete_folder(folderPath).catch(e => {
-                    console.log(`ℹ️ Folder cleanup skipped (might have other files): ${e.message}`);
-                });
-
-                // Also try the Xerox mirror folder if it's a Xerox order (orderCode vs pickupCode)
-                if (isXerox && orderData.orderCode && orderData.orderCode !== code) {
-                   const altPath = `xerox_orders/${orderData.orderCode}`;
-                   await cloudinary.api.delete_folder(altPath).catch(() => null);
-                }
-            }
-        } catch (folderErr) {
-            console.warn(`⚠️ Folder removal error for ${orderId}: ${folderErr.message}`);
-        }
-    } else if (publicIds.length > 0) {
-        console.log(`ℹ️ All files of order ${orderId} are shared. Cloudinary assets preserved.`);
+        console.log(`🗑️ Deleting ${toDeleteIds.length} verified unique files for ${orderId}...`);
+        await cloudinary.api.delete_resources(toDeleteIds, { resource_type: 'image' }).catch(() => null);
+        await cloudinary.api.delete_resources(toDeleteIds, { resource_type: 'raw' }).catch(() => null);
     }
 }
 
@@ -158,72 +124,77 @@ async function deleteOrderFilesFromCloudinary(orderId, orderData, colName) {
 // ============================================================================
 async function cleanupOrder(orderId, orderData, colName = "orders") {
     try {
+        // 🚀 1. PURGE CLOUDINARY IMMEDIATELY
+        console.log(`🗑️ [${orderId}] Cleanup triggered. Purging assets...`);
         await deleteOrderFilesFromCloudinary(orderId, orderData, colName);
 
-        // 🔥 FULL DELETE Logic: As requested, fully remove order from Firestore after grace period
-        if (orderData.status === 'completed' || orderData.orderDone) {
+        const status = orderData.status || '';
+        const isPrintedOrCompleted = orderData.orderStatus === 'printing completed' || orderData.orderStatus === 'order completed' || status === 'completed';
+
+        if (!isPrintedOrCompleted) {
+            // 💸 AUTO REFUND (If expired without print)
+            if (orderData.razorpayPaymentId && !orderData.razorpayPaymentId.startsWith('pay_admin_')) {
+                try {
+                    console.log(`💸 Processing AUTO REFUND for expired order ${orderId} | ₹${orderData.amount}`);
+                    await razorpayInstance.payments.refund(orderData.razorpayPaymentId, {
+                        amount: Math.round(Number(orderData.amount) * 100)
+                    });
+                } catch(err) {
+                    console.error(`❌ Refund failed for ${orderId}:`, err.message);
+                }
+            }
+        }
+
+        // 🚀 2. HARD DELETE IMMEDIATELY
+        console.log(`🔥 [${orderId}] Assets purged. Hard deleting record from ${colName}.`);
+        await db.collection(colName).doc(orderId).delete();
+        
+        const shopId = orderData.shopId;
+        if (shopId && dbAdmin) {
+            await dbAdmin.collection("shops").doc(shopId).collection("orders").doc(orderId).delete().catch(() => null);
+        }
+    } catch (error) {
+        console.error(`❌ Error in cleanupOrder for ${orderId}:`, error.message);
+    }
+}
+
+// ============================================================================
+// DEEP CLEANUP: Purge folders not found in Firestore (Orphaned Assets)
+// ============================================================================
+async function cleanupOrphanedCloudinaryAssets() {
+    console.log("🕵️ Starting Deep Cleanup: Checking for orphaned Cloudinary assets...");
+    const foldersToScan = ["xerox_orders", "xerox_processed_orders"];
+    
+    // We check both Cloudinary Accounts
+    for (const config of [configA, configB]) {
+        cloudinary.config(config);
+        
+        for (const root of foldersToScan) {
             try {
-                // Send Delayed "Order Completed" Notification (10 mins later)
-                const userId = orderData.userId;
-                if (userId) {
-                    const userDoc = await db.collection("users").doc(userId).get();
-                    if (userDoc.exists && userDoc.data().fcmToken) {
-                        const message = {
-                            notification: { 
-                                title: "✅ Order Completed", 
-                                body: "Greetings for your order completion. Visit again!" 
-                            },
-                            data: { click_action: "FLUTTER_NOTIFICATION_CLICK" },
-                            token: userDoc.data().fcmToken,
-                            android: { priority: "high" },
-                            apns: { payload: { aps: { contentAvailable: true, sound: "default" } } }
-                        };
-                        try {
-                            await admin.app('customer').messaging().send(message);
-                        } catch(e) {
-                            await admin.messaging().send(message);
-                        }
-                        console.log(`✅ Sent delayed 'Completed' notification to user ${userId}`);
+                const result = await cloudinary.api.sub_folders(root).catch(() => ({ folders: [] }));
+                for (const folder of result.folders) {
+                    const pickupCode = folder.name;
+                    // Standard pickup codes are 6 digits. Sequential IDs might be 'order_1'.
+                    if (!pickupCode || pickupCode.length < 4) continue;
+
+                    // 🔍 Check if any ACTIVE or PENDING order exists with this code
+                    const xeroxMatch = await db.collection("xerox_orders").where("pickupCode", "==", pickupCode).limit(1).get();
+                    const orderMatch = await db.collection("orders").where("pickupCode", "==", pickupCode).limit(1).get();
+                    const sequentialMatch = await db.collection("xerox_orders").where("orderId", "==", pickupCode).limit(1).get();
+
+                    if (xeroxMatch.empty && orderMatch.empty && sequentialMatch.empty) {
+                        console.log(`🧹 Purging ORPHANED Cloudinary assets in folder: ${folder.path}`);
+                        
+                        // 1. Delete all resources in the folder
+                        await cloudinary.api.delete_resources_by_prefix(folder.path).catch(() => null);
+                        // 2. Delete the folder itself
+                        await cloudinary.api.delete_folder(folder.path).catch(() => null);
                     }
                 }
             } catch (err) {
-                console.error(`⚠️ Failed to send delayed notification: ${err.message}`);
-            }
-        } else {
-            // 💸 AUTO REFUND Logic: If order expired but was NOT completed/printed...
-            const isPrintedOrCompleted = orderData.orderStatus === 'printing completed' || orderData.orderStatus === 'order completed' || orderData.status === 'completed';
-            
-            if (!isPrintedOrCompleted) {
-                if (orderData.razorpayPaymentId) {
-                    try {
-                        console.log(`💸 Processing AUTO REFUND for expired order ${orderId} | ₹${orderData.amount}`);
-                        await razorpayInstance.payments.refund(orderData.razorpayPaymentId, {
-                            amount: Math.round(Number(orderData.amount) * 100) // Razorpay expects paise
-                        });
-                        console.log(`✅ Refund successful for ${orderId}`);
-                    } catch(err) {
-                        console.error(`❌ Refund failed for ${orderId}:`, err.error ? err.error.description : err.message);
-                        // We still proceed to delete the order so it isn't stuck forever.
-                    }
-                } else {
-                    console.log(`ℹ️ No razorpayPaymentId found for expired order ${orderId}. Skipping refund.`);
-                }
+                console.log(`⚠️ Scan failed for ${root} on Account: ${err.message}`);
             }
         }
-
-        await db.collection(colName).doc(orderId).delete();
-        console.log(`🔥 Order ${orderId} fully removed from ${colName}.`);
-        
-        // Mirror Delete (Admin Project)
-        const shopId = orderData.shopId;
-        if (shopId && dbAdmin) {
-            try {
-                await dbAdmin.collection("shops").doc(shopId).collection("orders").doc(orderId).delete();
-            } catch (_) {}
-        }
-    } catch (error) {
-        console.error(`❌ Error in cleanupOrder for ${orderId} in ${colName}:`, error.message);
-        throw error;
     }
 }
 
