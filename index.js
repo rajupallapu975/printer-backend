@@ -62,44 +62,43 @@ app.get("/run-cleanup", async (req, res) => {
 // ============================================================================
 // ENDPOINT: FETCH LIVE XEROX SHOPS (From Admin Firebase)
 // ============================================================================
-// 💡 Also handles optional trailing slash
-app.get(["/get-xerox-shops", "/get-xerox-shops/"], async (req, res, next) => {
+app.get("/get-xerox-shops", async (req, res, next) => {
   try {
-    console.log("🏪 Incoming request: /get-xerox-shops");
+    const { dbAdmin } = require("./firebase");
+
     console.log("🏪 Fetching shops from Admin Database...");
-    
-    // Use the already imported dbAdmin from line 11
+
     const snapshot = await dbAdmin.collection("shops").get();
-    
+
     if (snapshot.empty) {
-      console.log("⚠️ No shops found in 'shops' collection.");
       return res.json({ success: true, shops: [] });
     }
-    
-    console.log(`✅ Found ${snapshot.size} potential shops. Fetching online printers...`);
 
-    const shops = await Promise.all(snapshot.docs.map(async doc => {
-      const data = doc.data();
-      // Check for online printers in the sub-collection if needed, 
-      // or just return the shop data if it's considered active.
-      const printersSnapshot = await doc.ref.collection("printers").where("isOnline", "==", true).get();
-      
-      return {
-        id: doc.id,
-        ...data,
-        activePrinters: printersSnapshot.size
-      };
-    }));
-    
+    const shops = await Promise.all(
+      snapshot.docs.map(async (doc) => {
+        const printersSnapshot = await doc.ref
+          .collection("printers")
+          .where("isOnline", "==", true)
+          .get();
+
+        return {
+          id: doc.id,
+          ...doc.data(),
+          activePrinters: printersSnapshot.size,
+        };
+      })
+    );
+
     res.json({
       success: true,
-      shops
+      shops,
     });
   } catch (error) {
     console.error("❌ Error fetching shops:", error);
     next(error);
   }
 });
+
 // ============================================================================
 // ENDPOINT: CREATE RAZORPAY ORDER
 // ============================================================================
