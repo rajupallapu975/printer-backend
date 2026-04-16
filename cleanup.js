@@ -1,5 +1,5 @@
 const { dbCustomer: db, dbAdmin, admin } = require("./firebase");
-const { cloudinary, configA, configB } = require("./cloudinary");
+const { cloudinary, configB } = require("./cloudinary");
 const razorpayInstance = require("./razorpay");
 
 // ============================================================================
@@ -12,7 +12,7 @@ async function performCleanup() {
     try {
         const now = new Date();
         const tenMinsAgo = new Date(now.getTime() - 10 * 60 * 1000);
-        const collections = ["orders", "xerox_orders"];
+        const collections = ["xerox_orders"];
         let totalProcessed = 0;
         let totalFound = 0;
 
@@ -81,23 +81,19 @@ async function deleteOrderFilesFromCloudinary(orderId, orderData, colName) {
     const displayCode = orderData.pickupCode || orderData.orderCode || orderData.id;
     console.log(`🔍 [${orderId}] Cleanup Check: publicIds=[${publicIds.join(', ')}], code=${displayCode}`);
 
-    // 1️⃣ ID-BASED PURGE (Legacy/Standard)
+    // 1️⃣ ID-BASED PURGE
     if (publicIds.length > 0) {
         for (const pid of publicIds) {
             let isShared = false;
-            const collections = ["orders", "xerox_orders"];
-            for (const cn of collections) {
-                const sharingOrders = await db.collection(cn).where("publicIds", "array-contains", pid).limit(2).get();
-                if (cn === colName) { if (sharingOrders.size > 1) { isShared = true; break; } }
-                else { if (sharingOrders.size > 0) { isShared = true; break; } }
-            }
+            const sharingOrders = await db.collection("xerox_orders").where("publicIds", "array-contains", pid).limit(2).get();
+            if (sharingOrders.size > 1) isShared = true;
+            
             if (!isShared) toDeleteIds.push(pid);
         }
     }
 
     // 2️⃣ PREFIX-BASED PURGE (Aggressive - catches untracked files like "602862_1" or "file")
-    const isXerox = orderData.printMode === 'xeroxShop' || colName === 'xerox_orders';
-    cloudinary.config(isXerox ? configB : configA);
+    cloudinary.config(configB);
 
     if (displayCode) {
         const foldersToTry = ["xerox_orders", "xerox_processed_orders", "xerox_shop"];
@@ -106,9 +102,6 @@ async function deleteOrderFilesFromCloudinary(orderId, orderData, colName) {
             console.log(`🧹 Attempting prefix-wipe for: ${folderPath}`);
             await cloudinary.api.delete_resources_by_prefix(folderPath).catch(() => null);
             await cloudinary.api.delete_folder(folderPath).catch(() => null);
-            
-            // Catch root files like "xerox_processed_orders/602862_1"
-            await cloudinary.api.delete_resources_by_prefix(`${prefix}/${displayCode}`).catch(() => null);
         }
     }
 
@@ -122,7 +115,7 @@ async function deleteOrderFilesFromCloudinary(orderId, orderData, colName) {
 // ============================================================================
 // CLEANUP SINGLE ORDER
 // ============================================================================
-async function cleanupOrder(orderId, orderData, colName = "orders") {
+async function cleanupOrder(orderId, orderData, colName = "xerox_orders") {
     try {
         // 🚀 1. PURGE CLOUDINARY IMMEDIATELY
         console.log(`🗑️ [${orderId}] Cleanup triggered. Purging assets...`);
@@ -165,35 +158,31 @@ async function cleanupOrphanedCloudinaryAssets() {
     console.log("🕵️ Starting Deep Cleanup: Checking for orphaned Cloudinary assets...");
     const foldersToScan = ["xerox_orders", "xerox_processed_orders"];
     
-    // We check both Cloudinary Accounts
-    for (const config of [configA, configB]) {
-        cloudinary.config(config);
-        
-        for (const root of foldersToScan) {
-            try {
-                const result = await cloudinary.api.sub_folders(root).catch(() => ({ folders: [] }));
-                for (const folder of result.folders) {
-                    const pickupCode = folder.name;
-                    // Standard pickup codes are 6 digits. Sequential IDs might be 'order_1'.
-                    if (!pickupCode || pickupCode.length < 4) continue;
+    // Only check Xerox Account (configB)
+    cloudinary.config(configB);
+    
+    for (const root of foldersToScan) {
+        try {
+            const result = await cloudinary.api.sub_folders(root).catch(() => ({ folders: [] }));
+            for (const folder of result.folders) {
+                const pickupCode = folder.name;
+                if (!pickupCode || pickupCode.length < 4) continue;
 
-                    // 🔍 Check if any ACTIVE or PENDING order exists with this code
-                    const xeroxMatch = await db.collection("xerox_orders").where("pickupCode", "==", pickupCode).limit(1).get();
-                    const orderMatch = await db.collection("orders").where("pickupCode", "==", pickupCode).limit(1).get();
-                    const sequentialMatch = await db.collection("xerox_orders").where("orderId", "==", pickupCode).limit(1).get();
+                // 🔍 Check if any ACTIVE or PENDING order exists with this code
+                const xeroxMatch = await db.collection("xerox_orders").where("pickupCode", "==", pickupCode).limit(1).get();
+                const sequentialMatch = await db.collection("xerox_orders").where("orderId", "==", pickupCode).limit(1).get();
 
-                    if (xeroxMatch.empty && orderMatch.empty && sequentialMatch.empty) {
-                        console.log(`🧹 Purging ORPHANED Cloudinary assets in folder: ${folder.path}`);
-                        
-                        // 1. Delete all resources in the folder
-                        await cloudinary.api.delete_resources_by_prefix(folder.path).catch(() => null);
-                        // 2. Delete the folder itself
-                        await cloudinary.api.delete_folder(folder.path).catch(() => null);
-                    }
+                if (xeroxMatch.empty && sequentialMatch.empty) {
+                    console.log(`🧹 Purging ORPHANED Cloudinary assets in folder: ${folder.path}`);
+                    
+                    // 1. Delete all resources in the folder
+                    await cloudinary.api.delete_resources_by_prefix(folder.path).catch(() => null);
+                    // 2. Delete the folder itself
+                    await cloudinary.api.delete_folder(folder.path).catch(() => null);
                 }
-            } catch (err) {
-                console.log(`⚠️ Scan failed for ${root} on Account: ${err.message}`);
             }
+        } catch (err) {
+            console.log(`⚠️ Scan failed for ${root} on Account: ${err.message}`);
         }
     }
 }

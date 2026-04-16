@@ -195,27 +195,24 @@ async function sendShopkeeperOrderAlert(shopId) {
 // 🛡️ 3. Watch for Order Completion (Customer Alert - User App)
 function watchOrderCompletion() {
     console.log("📡 Listening for Order Completion (User App Alerts)...");
-    const collections = ["orders", "xerox_orders"];
     
-    collections.forEach(col => {
-        dbCustomer.collection(col)
-            .where("orderStatus", "==", "printing completed")
-            .onSnapshot(async (snapshot) => {
-                snapshot.docChanges().forEach(async (change) => {
-                    if (change.type === "added" || (change.type === "modified" && change.doc.data().orderStatus === "printing completed")) {
-                        const data = change.doc.data();
-                        
-                        // Prevent duplicate alerts (Use a 15-second freshness window)
-                        const now = Date.now();
-                        const updateTime = data.printedAt ? data.printedAt.toMillis() : now;
-                        if (now - updateTime > 15000) return;
+    dbCustomer.collection("xerox_orders")
+        .where("orderStatus", "==", "printing completed")
+        .onSnapshot(async (snapshot) => {
+            snapshot.docChanges().forEach(async (change) => {
+                if (change.type === "added" || (change.type === "modified" && change.doc.data().orderStatus === "printing completed")) {
+                    const data = change.doc.data();
+                    
+                    // Prevent duplicate alerts (Use a 15-second freshness window)
+                    const now = Date.now();
+                    const updateTime = data.printedAt ? data.printedAt.toMillis() : now;
+                    if (now - updateTime > 15000) return;
 
-                        console.log(`🖨️ Order Printed: ${data.orderCode || data.pickupCode} (User: ${data.userId})`);
-                        await sendUserCompletionAlert(data);
-                    }
-                });
-            }, (err) => console.error(`❌ ${col} Listener Error:`, err.message));
-    });
+                    console.log(`🖨️ Order Printed: ${data.orderCode || data.pickupCode} (User: ${data.userId})`);
+                    await sendUserCompletionAlert(data);
+                }
+            });
+        }, (err) => console.error(`❌ xerox_orders Listener Error:`, err.message));
 }
 
 const notifiedRecently = new Set(); // 🛡️ Memory Cache to prevent double-firing

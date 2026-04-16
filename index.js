@@ -12,7 +12,7 @@ const { dbCustomer: db, dbAdmin, admin } = require("./firebase");
 const { cloudinary, configB } = require("./cloudinary");
 const razorpayInstance = require("./razorpay");
 const { performCleanup, cleanupOrder, deleteOrderFilesFromCloudinary } = require("./cleanup");
-const { createOrder, syncOrderToAdmin, calculateCost, generateUniquePickupCode } = require("./order");
+const { createOrder, syncOrderToAdmin, generateUniquePickupCode } = require("./order");
 const { applyWatermark } = require("./watermark_service");
 require("./notification_watcher"); // 🚀 Start background listeners
 // ============================================================================
@@ -125,7 +125,6 @@ app.post("/verify-payment", async (req, res, next) => {
       userEmail,
       amount,
       totalPages,
-      printMode, // Added to differentiate
       customId
     } = req.body;
     if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
@@ -142,19 +141,18 @@ app.post("/verify-payment", async (req, res, next) => {
         return res.status(400).json({ success: false, error: "Invalid payment signature" });
       }
     }
-    // Create Order in Firestore(s)
+    // Create Order in Firestore
     const result = await createOrder(
       printSettings,
       razorpay_order_id,
       amount,
       totalPages,
-      printMode,
+      'xeroxShop',
       userId || 'guest_user',
       customId,
       userEmail
     );
-    const isXeroxShop = printMode === 'xeroxShop';
-    const mainCollection = isXeroxShop ? "xerox_orders" : "orders";
+    const mainCollection = "xerox_orders";
     // Update with payment details in Customer DB
     const updateData = {
       userId: userId || 'guest_user',
@@ -162,10 +160,6 @@ app.post("/verify-payment", async (req, res, next) => {
       paymentStatus: "PAID",
       status: "ACTIVE",
     };
-    // 🛡️ Only generate code if NOT a Xerox shop
-    if (!isXeroxShop) {
-      updateData.pickupCode = await generateUniquePickupCode(false);
-    }
     await db.collection(mainCollection).doc(result.orderId).update(updateData);
     // 🛡️ Admin sync removed from here to prevent incomplete orders from showing up.
     // It is now moved to /complete-order which is called after file upload success.
@@ -192,11 +186,9 @@ app.post("/complete-order", async (req, res, next) => {
     const { orderId, fileUrls, publicIds, printMode } = req.body;
     if (!orderId) return res.status(400).json({ error: "orderId required" });
     
-    // 🛠️ Determine mode and config
-    const isXerox = printMode === 'xeroxShop';
-    const collectionName = isXerox ? "xerox_orders" : "orders";
-    const activeConfig = isXerox ? configB : configA;
-
+    // 🛠️ Collection and config
+    const collectionName = "xerox_orders";
+    const activeConfig = configB;
     // 1. Efficiently update Customer DB
     const orderRef = db.collection(collectionName).doc(orderId);
     const orderDoc = await orderRef.get();
@@ -288,18 +280,18 @@ app.post("/complete-order", async (req, res, next) => {
       const finalFileUrls = watermarkedResults.map((r, i) => r.url || fileUrls[i]);
       const finalPublicIds = watermarkedResults.map((r, i) => r.publicId || publicIds[i]);
 
-      // 4. Update both project databases with the FINAL watermarked links
+      // 4. Update project databases with the FINAL watermarked links
       await db.collection(collectionName).doc(orderId).update({
         fileUrls: finalFileUrls,
         publicIds: finalPublicIds,
-        mirroredToAdmin: isXerox,
+        mirroredToAdmin: true,
         status: 'ACTIVE'
       });
 
       if (shopId) {
         console.log(`📡 Mirroring finalized Order ${orderId} to Shop Dashboard...`);
         // 🚀 Pass results directly to avoid stale data fetch
-        await syncOrderToAdmin(orderId, isXerox, watermarkedResults);
+        await syncOrderToAdmin(orderId, watermarkedResults);
       }
 
       } catch (err) {
@@ -367,60 +359,7 @@ app.post("/complete-order", async (req, res, next) => {
     next(error);
   }
 });
-// ============================================================================
-// HELPER: Send Push Notification to Customer
-// ============================================================================
-async function sendUserStatusNotification(userId, type, orderNumber) {
-  try {
-    if (!userId) return;
-    
-    let userDoc = await db.collection("users").doc(userId).get();
-    
-    // 🛡️ Fallback: If not found by ID (UID), search by email field (for legacy orders)
-    if (!userDoc.exists && userId.includes('@')) {
-        const snapshot = await db.collection("users").where("email", "==", userId).limit(1).get();
-        if (!snapshot.empty) userDoc = snapshot.docs[0];
-    }
 
-    if (!userDoc.exists) {
-      console.warn(`⚠️ No user record found for ${userId}`);
-      return;
-    }
-
-    const fcmToken = userDoc.data().fcmToken;
-    if (!fcmToken) {
-      console.warn(`⚠️ No FCM token found for user ${userId}`);
-      return;
-    }
-    const displayOrderNum = (orderNumber || 'your order').toLowerCase().replace('_', ' ');
-    let title, body;
-    if (type === 'printed') {
-      title = "Print Successful! 🎉";
-      body = "Your prints are ready! Please visit the shop to collect them. Visit again!";
-    } else if (type === 'generated') {
-      title = "Order Ready for Pickup";
-      body = "Your order is ready. Visit the shop and scan the QR code to collect.";
-    } else {
-      return;
-    }
-    const message = {
-      notification: { title, body },
-      data: { click_action: "FLUTTER_NOTIFICATION_CLICK" },
-      token: fcmToken,
-      android: { priority: "high" },
-      apns: { payload: { aps: { contentAvailable: true, sound: "default" } } }
-    };
-    // Customer App is initialized as 'customer' but sometimes it falls back if it's the only one.
-    try {
-      await admin.app('customer').messaging().send(message);
-    } catch (err) {
-      await admin.messaging().send(message);
-    }
-    console.log(`✅ Sent '${type}' notification to user ${userId} for ${displayOrderNum}`);
-  } catch (error) {
-    console.error(`❌ Error sending notification to user ${userId}:`, error.message);
-  }
-}
 // ============================================================================
 // ENDPOINT: MARK AS PRINTED (Cleanup)
 // ============================================================================
@@ -428,38 +367,28 @@ app.post("/mark-printed", async (req, res, next) => {
   try {
     const { orderId } = req.body;
     if (!orderId) return res.status(400).json({ error: "orderId required" });
-    // Try to find in both collections
-    const collections = ["orders", "xerox_orders"];
-    let orderDoc = null;
-    let foundCol = null;
-
-    for (const col of collections) {
-      // 1. Direct ID lookup
-      let doc = await db.collection(col).doc(orderId).get();
-      
-      // 2. Fallback: Search by orderCode field
-      if (!doc.exists) {
-        const snap = await db.collection(col).where("orderCode", "==", orderId).limit(1).get();
-        if (!snap.empty) doc = snap.docs[0];
-      }
-      
-      // 3. Fallback: Search by pickupCode field
-      if (!doc.exists) {
-        const snap = await db.collection(col).where("pickupCode", "==", orderId).limit(1).get();
-        if (!snap.empty) doc = snap.docs[0];
-      }
-
-      if (doc.exists) {
-        orderDoc = doc;
-        foundCol = col;
-        break;
-      }
+    // Check xerox_orders collection
+    const collection = "xerox_orders";
+    let orderDoc = await db.collection(collection).doc(orderId).get();
+    
+    // Fallback: Search by orderCode field
+    if (!orderDoc.exists) {
+      const snap = await db.collection(collection).where("orderCode", "==", orderId).limit(1).get();
+      if (!snap.empty) orderDoc = snap.docs[0];
+    }
+    
+    // Fallback: Search by pickupCode field
+    if (!orderDoc.exists) {
+      const snap = await db.collection(collection).where("pickupCode", "==", orderId).limit(1).get();
+      if (!snap.empty) orderDoc = snap.docs[0];
     }
 
-    if (!orderDoc) {
-      console.warn(`⚠️ [mark-printed] Order ${orderId} not found in any collection.`);
-      return res.status(404).json({ error: "Order not found in any collection" });
+    if (!orderDoc.exists) {
+      console.warn(`⚠️ [mark-printed] Order ${orderId} not found.`);
+      return res.status(404).json({ error: "Order not found" });
     }
+
+    const foundCol = collection;
 
     const orderData = orderDoc.data();
     const targetRef = orderDoc.ref; // 🚀 Use the ref from whichever doc we found
@@ -515,18 +444,14 @@ app.post("/mark-delivered", async (req, res, next) => {
     const expiresAt = admin.firestore.Timestamp.fromDate(new Date(Date.now() + 10 * 60 * 1000));
     // 🚀 NEW: IMMEDIATELY DELETE FILES & RECORDS ON ANY SCAN COMPLETION
     try {
-      const collections = ["xerox_orders", "orders"];
+      const collection = "xerox_orders";
       let foundData = null;
-      let foundCol = null;
+      let foundCol = collection;
 
-      // 🔍 1. Find the order in any collection
-      for (const col of collections) {
-        const doc = await db.collection(col).doc(orderId).get();
-        if (doc.exists) {
-          foundData = doc.data();
-          foundCol = col;
-          break;
-        }
+      // 🔍 1. Find the order in xerox_orders
+      const doc = await db.collection(collection).doc(orderId).get();
+      if (doc.exists) {
+        foundData = doc.data();
       }
 
       if (foundData) {
@@ -611,14 +536,10 @@ app.post("/delete-order-files", async (req, res, next) => {
     let dataForDeletion = null;
     let colForDeletion = "xerox_orders";
 
-    const collections = ["xerox_orders", "orders"];
-    for (const col of collections) {
-      const doc = await db.collection(col).doc(orderId).get();
-      if (doc.exists) {
+    // Check xerox_orders
+    const doc = await db.collection(colForDeletion).doc(orderId).get();
+    if (doc.exists) {
         dataForDeletion = doc.data();
-        colForDeletion = col;
-        break;
-      }
     }
 
     if (!dataForDeletion) {
