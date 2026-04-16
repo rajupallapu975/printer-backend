@@ -62,22 +62,35 @@ app.get("/run-cleanup", async (req, res) => {
 // ============================================================================
 // ENDPOINT: FETCH LIVE XEROX SHOPS (From Admin Firebase)
 // ============================================================================
-app.get("/get-xerox-shops", async (req, res, next) => {
+// 💡 Also handles optional trailing slash
+app.get(["/get-xerox-shops", "/get-xerox-shops/"], async (req, res, next) => {
   try {
-    const { dbAdmin } = require("./firebase");
+    console.log("🏪 Incoming request: /get-xerox-shops");
     console.log("🏪 Fetching shops from Admin Database...");
+    
+    // Use the already imported dbAdmin from line 11
     const snapshot = await dbAdmin.collection("shops").get();
+    
     if (snapshot.empty) {
+      console.log("⚠️ No shops found in 'shops' collection.");
       return res.json({ success: true, shops: [] });
     }
+    
+    console.log(`✅ Found ${snapshot.size} potential shops. Fetching online printers...`);
+
     const shops = await Promise.all(snapshot.docs.map(async doc => {
+      const data = doc.data();
+      // Check for online printers in the sub-collection if needed, 
+      // or just return the shop data if it's considered active.
       const printersSnapshot = await doc.ref.collection("printers").where("isOnline", "==", true).get();
+      
       return {
         id: doc.id,
-        ...doc.data(),
+        ...data,
         activePrinters: printersSnapshot.size
       };
     }));
+    
     res.json({
       success: true,
       shops
@@ -623,6 +636,17 @@ app.get("/proxy-download", async (req, res, next) => {
     }
   }
 });
+// ============================================================================
+// 404 HANDLER (MUST BE LAST)
+// ============================================================================
+app.use((req, res) => {
+  console.log(`⚠️ 404 NOT FOUND: ${req.method} ${req.url}`);
+  res.status(404).json({
+    success: false,
+    error: `Route ${req.method} ${req.url} not found on this server.`
+  });
+});
+
 // ============================================================================
 // ERROR HANDLER
 // ============================================================================
