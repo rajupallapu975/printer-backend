@@ -377,69 +377,79 @@ app.post("/complete-order", async (req, res, next) => {
 // ============================================================================
 app.post("/mark-printed", async (req, res, next) => {
   try {
-    const { orderId } = req.body;
+    const { orderId, shopId } = req.body;
     if (!orderId) return res.status(400).json({ error: "orderId required" });
-    // Check xerox_orders collection
-    const collection = "xerox_orders";
-    let orderDoc = await db.collection(collection).doc(orderId).get();
     
-    // Fallback: Search by orderCode field
-    if (!orderDoc.exists) {
-      const snap = await db.collection(collection).where("orderCode", "==", orderId).limit(1).get();
-      if (!snap.empty) orderDoc = snap.docs[0];
-    }
-    
-    // Fallback: Search by pickupCode field
-    if (!orderDoc.exists) {
-      const snap = await db.collection(collection).where("pickupCode", "==", orderId).limit(1).get();
-      if (!snap.empty) orderDoc = snap.docs[0];
-    }
+    let customerDocUpdated = false;
+    let adminDocUpdated = false;
 
-    if (!orderDoc.exists) {
-      console.warn(`⚠️ [mark-printed] Order ${orderId} not found.`);
-      return res.status(404).json({ error: "Order not found" });
-    }
-
-    const foundCol = collection;
-
-    const orderData = orderDoc.data();
-    const targetRef = orderDoc.ref; // 🚀 Use the ref from whichever doc we found
-    // Prevent duplicate push notifications
-    if (orderData.orderStatus === 'printing completed' || orderData.orderStatus === 'order completed') {
-        console.log(`♻️ Order ${orderId} already marked as printed. Skipping notification.`);
-    } else {
-      console.log(`✅ [Step 1] Marking order ${orderId} as printed from ${foundCol}...`);
+    // 1. Try to update Customer DB
+    try {
+      const collection = "xerox_orders";
+      let orderDoc = await db.collection(collection).doc(orderId).get();
       
-      // 1. Mark printing as done in Customer DB
-      await targetRef.update({
-        orderStatus: 'printing completed',
-        printStatus: 'printed',
-        printedAt: admin.firestore.FieldValue.serverTimestamp(),
-      });
-      console.log(`✅ [Step 2] Customer DB updated for ${orderId}`);
+      if (!orderDoc.exists) {
+        const snap = await db.collection(collection).where("orderCode", "==", orderId).limit(1).get();
+        if (!snap.empty) orderDoc = snap.docs[0];
+      }
+      
+      if (!orderDoc.exists) {
+        const snap = await db.collection(collection).where("pickupCode", "==", orderId).limit(1).get();
+        if (!snap.empty) orderDoc = snap.docs[0];
+      }
 
-      // 🛡️ 2. Double-Sync: Update Admin DB directly (Bypass Watcher)
-      try {
-        const { dbAdmin } = require("./firebase");
-        const shopId = orderData.shopId;
-        if (shopId) {
-          await dbAdmin.collection("shops").doc(shopId).collection("orders").doc(orderId).update({
+      if (orderDoc.exists) {
+        const orderData = orderDoc.data();
+        await orderDoc.ref.update({
+          orderStatus: 'printing completed',
+          printStatus: 'printed',
+          printedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        customerDocUpdated = true;
+        console.log(`✅ Customer DB updated for ${orderId}`);
+        
+        const resolvedShopId = shopId || orderData.shopId;
+        if (resolvedShopId) {
+          await dbAdmin.collection("shops").doc(resolvedShopId).collection("orders").doc(orderId).update({
             orderStatus: 'printing completed',
             status: 'ready',
             timestamp: admin.firestore.FieldValue.serverTimestamp(),
           });
-          console.log(`✅ [Step 3] Dual-Sync: Admin DB updated for Shop ${shopId}`);
+          adminDocUpdated = true;
+          console.log(`✅ Admin DB updated for ${orderId} (Shop ${resolvedShopId})`);
         }
-      } catch (adminErr) {
-        console.warn("⚠️ [Step 3 Warning] Dual-Sync to Admin DB failed:", adminErr.message);
       }
-      
-      // 3. Notification Handled by Global Watcher (notification_watcher.js)
-      // To avoid duplicates, the API only updates the DB; the watcher sends the FCM.
-      console.log(`📡 [Step 4] Handing off notification to Global Watcher for ${orderId}`);
-
-      res.json({ success: true, message: `Order ${orderId} processed successfully.` });
+    } catch (err) {
+      console.warn("⚠️ Customer DB update error in /mark-printed:", err.message);
     }
+
+    // 2. If Admin DB was not updated and shopId is available, update it directly
+    if (!adminDocUpdated && shopId) {
+      try {
+        const adminOrderRef = dbAdmin.collection("shops").doc(shopId).collection("orders").doc(orderId);
+        const adminOrderDoc = await adminOrderRef.get();
+        if (adminOrderDoc.exists) {
+          await adminOrderRef.update({
+            orderStatus: 'printing completed',
+            status: 'ready',
+            timestamp: admin.firestore.FieldValue.serverTimestamp(),
+          });
+          adminDocUpdated = true;
+          console.log(`✅ Admin DB updated directly for ${orderId} (Shop ${shopId})`);
+        }
+      } catch (err) {
+        console.warn("⚠️ Admin DB direct update error in /mark-printed:", err.message);
+      }
+    }
+
+    // Return success if at least one document was updated
+    if (customerDocUpdated || adminDocUpdated) {
+      return res.json({ success: true, message: `Order ${orderId} processed successfully.` });
+    } else {
+      console.warn(`⚠️ [mark-printed] Order ${orderId} not found in Customer DB or Admin DB.`);
+      return res.status(404).json({ error: "Order not found" });
+    }
+
   } catch (error) {
     console.error("❌ [CRITICAL] mark-printed endpoint error:", error);
     next(error);
