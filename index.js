@@ -646,6 +646,26 @@ app.get("/proxy-download", async (req, res, next) => {
   }
 });
 // ============================================================================
+// ENDPOINT: SET SHOP STATUS (Online/Offline)
+// ============================================================================
+app.post("/set-shop-status", async (req, res, next) => {
+  try {
+    const { shopId, isOpen } = req.body;
+    if (!shopId) return res.status(400).json({ error: "shopId required" });
+    
+    await dbAdmin.collection("shops").doc(shopId).update({
+      isOpen: isOpen === true || isOpen === 'true',
+      lastUpdatedAt: admin.firestore.FieldValue.serverTimestamp()
+    });
+
+    console.log(`🏪 Shop ${shopId} marked as ${isOpen ? 'ONLINE' : 'OFFLINE'}`);
+    res.json({ success: true, message: `Shop ${shopId} is now ${isOpen ? 'online' : 'offline'}.` });
+  } catch (error) {
+    console.error("❌ Error setting shop status:", error);
+    next(error);
+  }
+});
+// ============================================================================
 // 404 HANDLER (MUST BE LAST)
 // ============================================================================
 app.use((req, res) => {

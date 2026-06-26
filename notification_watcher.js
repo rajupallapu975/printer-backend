@@ -281,3 +281,123 @@ async function sendUserCompletionAlert(data) {
 watchPayoutRequests();
 watchShopOrders();
 watchOrderCompletion();
+
+// ============================================================================
+// ⏰ AUTOMATED PRE-OPENING REMINDER TASK (10-minute Alert)
+// ============================================================================
+
+function parseOpeningTime(timeStr) {
+    try {
+        let hours, minutes;
+        if (timeStr.includes('AM') || timeStr.includes('PM')) {
+            const parts = timeStr.trim().split(/\s+/);
+            const hm = parts[0].split(':');
+            hours = parseInt(hm[0], 10);
+            minutes = parseInt(hm[1], 10);
+            const ampm = parts[1].toUpperCase();
+            if (ampm === 'PM' && hours < 12) hours += 12;
+            if (ampm === 'AM' && hours === 12) hours = 0;
+        } else {
+            const hm = timeStr.trim().split(':');
+            hours = parseInt(hm[0], 10);
+            minutes = parseInt(hm[1], 10);
+        }
+        return { hours, minutes };
+    } catch (e) {
+        return null;
+    }
+}
+
+function getISTDate() {
+    const utc = new Date();
+    // IST is UTC + 5.5 hours
+    const ist = new Date(utc.getTime() + (5.5 * 60 * 60 * 1000));
+    return ist;
+}
+
+async function checkShopOpeningNotifications() {
+    try {
+        const ist = getISTDate();
+        const currentDateStr = `${ist.getFullYear()}-${ist.getMonth() + 1}-${ist.getDate()}`;
+        const currentMinutes = ist.getHours() * 60 + ist.getMinutes();
+
+        console.log(`⏰ [Scheduler] Running opening reminder check (IST Time: ${ist.getHours()}:${ist.getMinutes()})...`);
+
+        const snapshot = await dbAdmin.collection("shops").get();
+        if (snapshot.empty) return;
+
+        for (const doc of snapshot.docs) {
+            const shopData = doc.data();
+            const openingTimeStr = shopData.openingTime;
+            const fcmToken = shopData.fcmToken;
+
+            if (!openingTimeStr || !fcmToken) continue;
+
+            const parsed = parseOpeningTime(openingTimeStr);
+            if (!parsed) continue;
+
+            const targetMinutes = parsed.hours * 60 + parsed.minutes;
+            
+            // Check if current time is 10 minutes before opening time.
+            // Since this runs once a minute, we check if targetMinutes - currentMinutes is exactly 10.
+            const diff = targetMinutes - currentMinutes;
+
+            if (diff === 10) {
+                if (shopData.lastOpeningNotifiedDate === currentDateStr) {
+                    continue; // Already notified today
+                }
+
+                console.log(`🔔 Sending 10-min pre-open alert to Shop: ${shopData.shopName || doc.id}`);
+                
+                // Update Firestore first to prevent duplicate notifications
+                await doc.ref.update({
+                    lastOpeningNotifiedDate: currentDateStr
+                });
+
+                // Send push notification
+                await sendShopkeeperAlert(
+                    fcmToken,
+                    "🖨️ Get Ready! Shop opening soon",
+                    `Your shop opens in 10 minutes (${openingTimeStr}). Please open the app and go online to get orders.`
+                );
+            }
+        }
+    } catch (error) {
+        console.error("❌ Error in checkShopOpeningNotifications:", error.message);
+    }
+}
+
+async function sendShopkeeperAlert(fcmToken, title, body) {
+    try {
+        const message = {
+            notification: {
+                title: title,
+                body: body
+            },
+            data: {
+                click_action: "FLUTTER_NOTIFICATION_CLICK",
+                category: "shop_reminder"
+            },
+            token: fcmToken,
+            android: {
+                priority: "high",
+                notification: {
+                    channelId: "admin_orders",
+                    priority: "high"
+                }
+            },
+            apns: { payload: { aps: { contentAvailable: true, sound: "default" } } }
+        };
+
+        const response = await admin.app('admin').messaging().send(message);
+        console.log(`✅ Alert sent to Shop Captain:`, response);
+    } catch (error) {
+        console.error("❌ Shopkeeper Alert Error:", error.message);
+    }
+}
+
+// Start Scheduler (runs every 1 minute)
+setInterval(checkShopOpeningNotifications, 60 * 1000);
+// Trigger once on startup after a 5-second delay
+setTimeout(checkShopOpeningNotifications, 5000);
+
