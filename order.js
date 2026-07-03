@@ -9,9 +9,70 @@ const { dbCustomer: db, dbAdmin, admin } = require("./firebase");
  * B/W (Single): ₹2 per page
  * B/W (Double): ₹3 per sheet (2 pages)
  */
-function calculateCost(printSettings) {
+async function calculateCost(printSettings) {
   let total = 0;
   if (!printSettings.files || !Array.isArray(printSettings.files)) return 0;
+  
+  let shopConfig = null;
+  let globalParams = null;
+  
+  if (printSettings.shopId) {
+    try {
+      const shopDoc = await dbAdmin.collection("shops").doc(printSettings.shopId).get();
+      if (shopDoc.exists) {
+        const shopData = shopDoc.data();
+        const zikrinterServices = shopData.zikrinterServices || {};
+        for (const serviceId of Object.keys(zikrinterServices)) {
+          if (zikrinterServices[serviceId].isEnabled === true) {
+            shopConfig = zikrinterServices[serviceId];
+            
+            const serviceDoc = await db.collection("services").doc(serviceId).get();
+            if (serviceDoc.exists) {
+              globalParams = serviceDoc.data().parameters || {};
+            }
+            break;
+          }
+        }
+      }
+    } catch (e) {
+      console.error("Error loading shop pricing in backend:", e.message);
+    }
+  }
+
+  // 1. Fallback defaults
+  let colorSinglePrice = 10.0;
+  let colorDoublePrice = 15.0; 
+  let colorBulkPrice = 8.0;
+  let colorBulkSetPages = 50;
+
+  let bwSinglePrice = 2.0;
+  let bwDoublePrice = 3.0; // ₹3 per sheet (2 pages)
+  let bwBulkPrice = 1.5;
+  let bwBulkSetPages = 100;
+
+  // 2. Overwrite with shop specific prices if loaded
+  if (shopConfig) {
+    colorSinglePrice = Number(shopConfig.color_singleSidePrice ?? shopConfig.singleSidePrice ?? colorSinglePrice);
+    colorDoublePrice = Number(shopConfig.color_doubleSidePrice ?? shopConfig.doubleSidePrice ?? colorDoublePrice);
+    colorBulkPrice = Number(shopConfig.color_bulkPrintingPrice ?? shopConfig.bulkPrintingPrice ?? colorBulkPrice);
+
+    bwSinglePrice = Number(shopConfig.bw_singleSidePrice ?? bwSinglePrice);
+    bwDoublePrice = Number(shopConfig.bw_doubleSidePrice ?? bwDoublePrice);
+    bwBulkPrice = Number(shopConfig.bw_bulkPrintingPrice ?? bwBulkPrice);
+  }
+
+  // 3. Overwrite bulk setPages from global parameters if loaded
+  if (globalParams) {
+    const colorBulkGlobal = globalParams.color_bulkPrinting || globalParams.bulkPrinting;
+    if (colorBulkGlobal && colorBulkGlobal.setPages != null) {
+      colorBulkSetPages = Number(colorBulkGlobal.setPages);
+    }
+    const bwBulkGlobal = globalParams.bw_bulkPrinting;
+    if (bwBulkGlobal && bwBulkGlobal.setPages != null) {
+      bwBulkSetPages = Number(bwBulkGlobal.setPages);
+    }
+  }
+
   for (const file of printSettings.files) {
     const pages = file.pageCount || 1;
     const copies = file.copies || 1;
@@ -19,14 +80,24 @@ function calculateCost(printSettings) {
     const isDoubleSided = !!(file.doubleSided || file.duplex);
 
     if (isColor) {
-      total += 10 * pages * copies;
-    } else {
-      if (isDoubleSided && pages >= 2) {
+      if (pages >= colorBulkSetPages) {
+        total += colorBulkPrice * pages * copies;
+      } else if (isDoubleSided && pages >= 2) {
         const doubleSheets = Math.floor(pages / 2);
-        const singlePages = pages % 2;
-        total += (doubleSheets * 3 + singlePages * 2) * copies;
+        const remainingSingle = pages % 2;
+        total += (doubleSheets * colorDoublePrice + remainingSingle * colorSinglePrice) * copies;
       } else {
-        total += 2 * pages * copies;
+        total += colorSinglePrice * pages * copies;
+      }
+    } else {
+      if (pages >= bwBulkSetPages) {
+        total += bwBulkPrice * pages * copies;
+      } else if (isDoubleSided && pages >= 2) {
+        const doubleSheets = Math.floor(pages / 2);
+        const remainingSingle = pages % 2;
+        total += (doubleSheets * bwDoublePrice + remainingSingle * bwSinglePrice) * copies;
+      } else {
+        total += bwSinglePrice * pages * copies;
       }
     }
   }
@@ -59,7 +130,7 @@ async function createOrder(printSettings, razorpayOrderId = null, amount = 0, to
     
     // Xerox Shop is now the only mode
     const customerCollection = "xerox_orders";
-    const finalAmount = amount || calculateCost(printSettings);
+    const finalAmount = amount || await calculateCost(printSettings);
     const xeroxCode = await generateUniquePickupCode();
     const orderId = xeroxCode;
     
