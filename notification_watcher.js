@@ -278,7 +278,7 @@ async function sendUserCompletionAlert(data) {
 
 
 // Start All Global Listeners
-watchPayoutRequests();
+// watchPayoutRequests(); // Disconnected because Zikrint Payments app has been removed
 watchShopOrders();
 watchOrderCompletion();
 
