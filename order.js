@@ -185,7 +185,19 @@ async function createOrder(printSettings, razorpayOrderId = null, amount = 0, to
     
     // Xerox Shop is now the only mode
     const customerCollection = "xerox_orders";
-    const breakdown = await calculatePricingBreakdown(printSettings);
+    let breakdown;
+    if (printSettings.shopSubtotal !== undefined && printSettings.finalAmount !== undefined) {
+      breakdown = {
+        totalAmount: Number(printSettings.finalAmount),
+        printingCost: Number(printSettings.shopSubtotal),
+        platformCommission: Number(printSettings.commissionAmount),
+        commissionType: printSettings.commissionType || 'percentage',
+        commissionValue: Number(printSettings.commissionValue || 0),
+        shopPricingUsed: {},
+      };
+    } else {
+      breakdown = await calculatePricingBreakdown(printSettings);
+    }
     
     const xeroxCode = await generateUniquePickupCode();
     const orderId = xeroxCode;
