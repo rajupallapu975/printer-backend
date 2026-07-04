@@ -494,7 +494,12 @@ app.post("/mark-delivered", async (req, res, next) => {
                  if (aData.isPicked || aData.status === 'completed') return;
 
                  const totalAmount = Number(aData.amount || 0);
-                 const merchantAmount = totalAmount * 0.83;
+                 const merchantAmount = aData.shopkeeperEarnings !== undefined
+                    ? Number(aData.shopkeeperEarnings)
+                    : totalAmount * 0.83;
+                 const platformEarnings = aData.platformEarnings !== undefined
+                    ? Number(aData.platformEarnings)
+                    : totalAmount - merchantAmount;
                  
                  transaction.update(shopRef, {
                    walletBalance: (Number(sData.walletBalance) || 0) + merchantAmount,
@@ -505,6 +510,7 @@ app.post("/mark-delivered", async (req, res, next) => {
                  transaction.set(shopRef.collection("transactions").doc(), {
                    amount: merchantAmount,
                    totalValue: totalAmount,
+                   platformCommission: platformEarnings,
                    title: `Payout: #${aData.orderCode || 'SCAN'}`,
                    timestamp: admin.firestore.FieldValue.serverTimestamp(),
                    type: 'credit',

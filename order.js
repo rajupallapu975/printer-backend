@@ -9,39 +9,46 @@ const { dbCustomer: db, dbAdmin, admin } = require("./firebase");
  * B/W (Single): ₹2 per page
  * B/W (Double): ₹3 per sheet (2 pages)
  */
-async function calculateCost(printSettings) {
-  let total = 0;
-  if (!printSettings.files || !Array.isArray(printSettings.files)) return 0;
-  
+async function calculatePricingBreakdown(printSettings) {
+  let printingCost = 0;
+  let platformCommission = 0;
+
+  if (!printSettings.files || !Array.isArray(printSettings.files)) {
+    return {
+      printingCost: 0,
+      platformCommission: 0,
+      totalAmount: 0,
+      shopPricingUsed: {},
+      commissionType: 'percentage',
+      commissionValue: 0,
+    };
+  }
+
+  const serviceId = printSettings.serviceId || 'ZHwQd18Vy08TZkyBFXjB';
   let shopConfig = null;
   let globalParams = null;
-  
+
   if (printSettings.shopId) {
     try {
       const shopDoc = await dbAdmin.collection("shops").doc(printSettings.shopId).get();
       if (shopDoc.exists) {
         const shopData = shopDoc.data();
         const zikrinterServices = shopData.zikrinterServices || {};
-        for (const serviceId of Object.keys(zikrinterServices)) {
-          if (zikrinterServices[serviceId].isEnabled === true) {
-            shopConfig = zikrinterServices[serviceId];
-            
-            const serviceDoc = await db.collection("services").doc(serviceId).get();
-            if (serviceDoc.exists) {
-              globalParams = serviceDoc.data().parameters || {};
-            }
-            break;
-          }
+        shopConfig = zikrinterServices[serviceId];
+
+        const serviceDoc = await db.collection("services").doc(serviceId).get();
+        if (serviceDoc.exists) {
+          globalParams = serviceDoc.data().parameters || {};
         }
       }
     } catch (e) {
-      console.error("Error loading shop pricing in backend:", e.message);
+      console.error("Error loading shop pricing in breakdown:", e.message);
     }
   }
 
   // 1. Fallback defaults
   let colorSinglePrice = 10.0;
-  let colorDoublePrice = 15.0; 
+  let colorDoublePrice = 15.0;
   let colorBulkPrice = 8.0;
   let colorBulkSetPages = 50;
 
@@ -73,36 +80,84 @@ async function calculateCost(printSettings) {
     }
   }
 
+  // Track the primary commission type/value used for metadata
+  let primaryCommissionType = 'percentage';
+  let primaryCommissionValue = 0.0;
+
   for (const file of printSettings.files) {
     const pages = file.pageCount || 1;
     const copies = file.copies || 1;
     const isColor = file.color === "COLOR";
     const isDoubleSided = !!(file.doubleSided || file.duplex);
 
+    let filePrintCost = 0;
+    let fileCommission = 0;
+
+    let paramKey = '';
     if (isColor) {
       if (pages >= colorBulkSetPages) {
-        total += colorBulkPrice * pages * copies;
+        paramKey = 'color_bulkPrinting';
+        filePrintCost = colorBulkPrice * pages * copies;
       } else if (isDoubleSided && pages >= 2) {
+        paramKey = 'color_doubleSide';
         const doubleSheets = Math.floor(pages / 2);
         const remainingSingle = pages % 2;
-        total += (doubleSheets * colorDoublePrice + remainingSingle * colorSinglePrice) * copies;
+        filePrintCost = (doubleSheets * colorDoublePrice + remainingSingle * colorSinglePrice) * copies;
       } else {
-        total += colorSinglePrice * pages * copies;
+        paramKey = 'color_singleSide';
+        filePrintCost = colorSinglePrice * pages * copies;
       }
     } else {
       if (pages >= bwBulkSetPages) {
-        total += bwBulkPrice * pages * copies;
+        paramKey = 'bw_bulkPrinting';
+        filePrintCost = bwBulkPrice * pages * copies;
       } else if (isDoubleSided && pages >= 2) {
+        paramKey = 'bw_doubleSide';
         const doubleSheets = Math.floor(pages / 2);
         const remainingSingle = pages % 2;
-        total += (doubleSheets * bwDoublePrice + remainingSingle * bwSinglePrice) * copies;
+        filePrintCost = (doubleSheets * bwDoublePrice + remainingSingle * bwSinglePrice) * copies;
       } else {
-        total += bwSinglePrice * pages * copies;
+        paramKey = 'bw_singleSide';
+        filePrintCost = bwSinglePrice * pages * copies;
       }
     }
+
+    // Get commission for this param
+    let commVal = 0;
+    let commType = 'percentage';
+    if (globalParams && globalParams[paramKey]) {
+      commVal = Number(globalParams[paramKey].commission || 0);
+      commType = globalParams[paramKey].commissionType || 'percentage';
+    }
+
+    primaryCommissionType = commType;
+    primaryCommissionValue = commVal;
+
+    if (commType === 'fixed') {
+      fileCommission = commVal * pages * copies;
+    } else {
+      fileCommission = filePrintCost * (commVal / 100.0);
+    }
+
+    printingCost += filePrintCost;
+    platformCommission += fileCommission;
   }
-  return total;
+
+  return {
+    printingCost,
+    platformCommission,
+    totalAmount: printingCost + platformCommission,
+    shopPricingUsed: shopConfig || {},
+    commissionType: primaryCommissionType,
+    commissionValue: primaryCommissionValue,
+  };
 }
+
+async function calculateCost(printSettings) {
+  const breakdown = await calculatePricingBreakdown(printSettings);
+  return breakdown.totalAmount;
+}
+
 async function generateUniquePickupCode() {
   let code;
   let exists = true;
@@ -130,16 +185,35 @@ async function createOrder(printSettings, razorpayOrderId = null, amount = 0, to
     
     // Xerox Shop is now the only mode
     const customerCollection = "xerox_orders";
-    const finalAmount = amount || await calculateCost(printSettings);
+    const breakdown = await calculatePricingBreakdown(printSettings);
+    
     const xeroxCode = await generateUniquePickupCode();
     const orderId = xeroxCode;
     
+    const serviceId = printSettings.serviceId || 'ZHwQd18Vy08TZkyBFXjB';
+    const serviceName = printSettings.serviceName || 'Documents (Xerox)';
+
     const orderData = {
       orderId,
       userId,
       userEmail: userEmail || userId, // Display email in Admin App
       printSettings,
-      amount: finalAmount,
+      
+      // Dynamic Pricing & Splitting Metadata
+      amount: breakdown.totalAmount, // Final Amount
+      printingCost: breakdown.printingCost,
+      platformCommission: breakdown.platformCommission,
+      commissionType: breakdown.commissionType,
+      commissionValue: breakdown.commissionValue,
+      totalPaid: breakdown.totalAmount,
+      shopkeeperEarnings: breakdown.printingCost,
+      platformEarnings: breakdown.platformCommission,
+      shopPricingUsed: breakdown.shopPricingUsed,
+      serviceId,
+      serviceName,
+      shopId: printSettings.shopId || '',
+      shopName: printSettings.shopName || '',
+
       printMode: 'xeroxShop',
       totalPages: totalPages || (printSettings.files ? printSettings.files.reduce((sum, f) => sum + (f.pageCount || 1) * (f.copies || 1), 0) : 0),
       paymentStatus: razorpayOrderId ? "PENDING" : "PAID",
@@ -156,8 +230,6 @@ async function createOrder(printSettings, razorpayOrderId = null, amount = 0, to
       customId: customId || null, // Sequential ID (order_1, order_2)
     };
 
-    if (printSettings.shopId) orderData.shopId = printSettings.shopId;
-
     // ⚡ CUSTOMER WRITE LOGIC
     await db.collection(customerCollection).doc(orderId).set(orderData);
     
@@ -166,7 +238,7 @@ async function createOrder(printSettings, razorpayOrderId = null, amount = 0, to
       pickupCode: orderData.pickupCode,
       xeroxId: orderData.xeroxId, // Firestore shop doc ID
       orderCode: xeroxCode,
-      amount: finalAmount
+      amount: breakdown.totalAmount
     };
   } catch (err) {
     console.error("❌ CREATE ORDER DB ERROR:", err.message);
@@ -250,8 +322,22 @@ async function syncOrderToAdmin(orderId, watermarkedResults = null) {
       colorPages: printSettings.files ? printSettings.files.reduce((sum, f) => sum + (f.color === 'COLOR' ? (f.pageCount || 1) * (f.copies || 1) : 0), 0) : 0,
       isDuplex: printSettings.files ? printSettings.files.some(f => f.doubleSided || f.duplex || f.doubleSide) : false,
       status: 'pending',
-      paymentStatus: 'done',
+      paymentStatus: orderDocData.paymentStatus || 'done',
+      razorpayPaymentId: orderDocData.razorpayPaymentId || null,
       amount: finalAmount,
+      
+      // Dynamic Pricing & Splitting Metadata Mirror
+      printingCost: orderDocData.printingCost,
+      platformCommission: orderDocData.platformCommission,
+      commissionType: orderDocData.commissionType,
+      commissionValue: orderDocData.commissionValue,
+      totalPaid: orderDocData.totalPaid,
+      shopkeeperEarnings: orderDocData.shopkeeperEarnings,
+      platformEarnings: orderDocData.platformEarnings,
+      shopPricingUsed: orderDocData.shopPricingUsed,
+      serviceId: orderDocData.serviceId,
+      serviceName: orderDocData.serviceName,
+
       timestamp: admin.firestore.FieldValue.serverTimestamp(),
       fileUrls: signedUrls,
       viewUrls: viewUrls,
