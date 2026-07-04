@@ -36,7 +36,10 @@ async function calculatePricingBreakdown(printSettings) {
         const zikrinterServices = shopData.zikrinterServices || {};
         shopConfig = zikrinterServices[serviceId];
 
-        const serviceDoc = await db.collection("services").doc(serviceId).get();
+        let serviceDoc = await db.collection("zikrinter").doc(serviceId).get();
+        if (!serviceDoc.exists) {
+          serviceDoc = await db.collection("services").doc(serviceId).get();
+        }
         if (serviceDoc.exists) {
           globalParams = serviceDoc.data().parameters || {};
         }
