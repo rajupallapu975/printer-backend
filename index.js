@@ -671,6 +671,558 @@ app.post("/set-shop-status", async (req, res, next) => {
     next(error);
   }
 });
+
+// ============================================================================
+// ENDPOINT: CONFIGURATION VERSION API
+// ============================================================================
+async function incrementServiceVersion() {
+  const increment = admin.firestore.FieldValue.increment(1);
+  await dbCustomer.collection("config").doc("serviceVersion").set({ version: increment }, { merge: true });
+  await dbAdmin.collection("config").doc("serviceVersion").set({ version: increment }, { merge: true });
+}
+
+app.get("/api/config/version", async (req, res, next) => {
+  try {
+    const docRef = dbCustomer.collection("config").doc("serviceVersion");
+    const doc = await docRef.get();
+    if (!doc.exists) {
+      await docRef.set({ version: 1 });
+      return res.json({ success: true, version: 1 });
+    }
+    res.json({ success: true, version: doc.data().version || 1 });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ============================================================================
+// ENDPOINTS: SERVICE MANAGEMENT CATALOG APIs (Used by Zikrinter Service Panel)
+// ============================================================================
+app.get("/api/services", async (req, res, next) => {
+  try {
+    const snapshot = await dbCustomer.collection("services").get();
+    const services = [];
+    snapshot.forEach(doc => {
+      const data = doc.data();
+      if (data.isDeleted !== true) {
+        services.push({ id: doc.id, ...data });
+      }
+    });
+    res.json({ success: true, services });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/services/:id", async (req, res, next) => {
+  try {
+    const doc = await dbCustomer.collection("services").doc(req.params.id).get();
+    if (!doc.exists || doc.data().isDeleted === true) {
+      return res.status(404).json({ success: false, error: "Service not found" });
+    }
+    res.json({ success: true, service: { id: doc.id, ...doc.data() } });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/services", async (req, res, next) => {
+  try {
+    const serviceData = req.body;
+    if (!serviceData.name) {
+      return res.status(400).json({ success: false, error: "Service name is required" });
+    }
+
+    const docId = serviceData.id || dbCustomer.collection("services").doc().id;
+    const timestamp = admin.firestore.FieldValue.serverTimestamp();
+    const newService = {
+      id: docId,
+      name: serviceData.name,
+      images: serviceData.images || [],
+      isActive: serviceData.isActive !== false,
+      parameters: serviceData.parameters || {},
+      customParameters: serviceData.customParameters || [],
+      startingPrice: Number(serviceData.startingPrice) || 0.0,
+      description: serviceData.description || "",
+      paperSizes: serviceData.paperSizes || ["A4"],
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      version: 1,
+      schemaVersion: 2,
+      isDeleted: false,
+      updatedBy: serviceData.updatedBy || "system_admin",
+    };
+
+    await dbCustomer.collection("services").doc(docId).set(newService);
+    await dbAdmin.collection("services").doc(docId).set(newService);
+
+    await dbCustomer.collection("service_audit_logs").add({
+      serviceId: docId,
+      action: "CREATE",
+      timestamp: timestamp,
+      updatedBy: newService.updatedBy,
+      details: "Created service centralized",
+    });
+
+    await incrementServiceVersion();
+
+    res.json({ success: true, service: newService });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.put("/api/services/:id", async (req, res, next) => {
+  try {
+    const docId = req.params.id;
+    const serviceData = req.body;
+
+    const docRef = dbCustomer.collection("services").doc(docId);
+    const docSnapshot = await docRef.get();
+    if (!docSnapshot.exists) {
+      return res.status(404).json({ success: false, error: "Service not found" });
+    }
+
+    const currentData = docSnapshot.data();
+    const currentVersion = Number(currentData.version) || 1;
+    const timestamp = admin.firestore.FieldValue.serverTimestamp();
+
+    const updatedService = {
+      ...currentData,
+      name: serviceData.name !== undefined ? serviceData.name : currentData.name,
+      images: serviceData.images !== undefined ? serviceData.images : currentData.images,
+      isActive: serviceData.isActive !== undefined ? serviceData.isActive : currentData.isActive,
+      parameters: serviceData.parameters !== undefined ? serviceData.parameters : currentData.parameters,
+      customParameters: serviceData.customParameters !== undefined ? serviceData.customParameters : currentData.customParameters,
+      startingPrice: serviceData.startingPrice !== undefined ? Number(serviceData.startingPrice) : currentData.startingPrice,
+      description: serviceData.description !== undefined ? serviceData.description : currentData.description,
+      paperSizes: serviceData.paperSizes !== undefined ? serviceData.paperSizes : currentData.paperSizes,
+      updatedAt: timestamp,
+      version: currentVersion + 1,
+      isDeleted: serviceData.isDeleted !== undefined ? serviceData.isDeleted : currentData.isDeleted,
+      updatedBy: serviceData.updatedBy || "system_admin",
+    };
+
+    await dbCustomer.collection("services").doc(docId).set(updatedService);
+    await dbAdmin.collection("services").doc(docId).set(updatedService);
+
+    await dbCustomer.collection("service_audit_logs").add({
+      serviceId: docId,
+      action: "UPDATE",
+      timestamp: timestamp,
+      updatedBy: updatedService.updatedBy,
+      details: "Updated service centralized",
+    });
+
+    await incrementServiceVersion();
+
+    res.json({ success: true, service: updatedService });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete("/api/services/:id", async (req, res, next) => {
+  try {
+    const docId = req.params.id;
+    const docRef = dbCustomer.collection("services").doc(docId);
+    const docSnapshot = await docRef.get();
+    if (!docSnapshot.exists) {
+      return res.status(404).json({ success: false, error: "Service not found" });
+    }
+
+    const currentData = docSnapshot.data();
+    const currentVersion = Number(currentData.version) || 1;
+    const timestamp = admin.firestore.FieldValue.serverTimestamp();
+
+    const deletedService = {
+      ...currentData,
+      isActive: false,
+      isDeleted: true,
+      updatedAt: timestamp,
+      version: currentVersion + 1,
+    };
+
+    await dbCustomer.collection("services").doc(docId).set(deletedService);
+    await dbAdmin.collection("services").doc(docId).set(deletedService);
+
+    await dbCustomer.collection("service_audit_logs").add({
+      serviceId: docId,
+      action: "DELETE",
+      timestamp: timestamp,
+      updatedBy: "system_admin",
+      details: "Soft deleted service centralized",
+    });
+
+    await incrementServiceVersion();
+
+    res.json({ success: true, message: "Service deleted successfully (soft delete)." });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ============================================================================
+// ENDPOINTS: SHOP AVAILABILITY & CONFIGURATION APIs (Used by Customer/Captain Apps)
+// ============================================================================
+app.get("/api/services/:id/shops", async (req, res, next) => {
+  try {
+    const serviceId = req.params.id;
+    const paperSize = req.query.paperSize;
+    if (!paperSize) {
+      return res.status(400).json({ success: false, error: "paperSize query parameter is required" });
+    }
+    const sizeKey = paperSize.toLowerCase();
+
+    const snapshot = await dbAdmin.collection("shops")
+      .where("isActive", "==", true)
+      .get();
+
+    const serviceDoc = await dbCustomer.collection("services").doc(serviceId).get();
+    if (!serviceDoc.exists || serviceDoc.data().isDeleted === true) {
+      return res.status(404).json({ success: false, error: "Service not found" });
+    }
+    const globalParams = serviceDoc.data().parameters || {};
+
+    const eligibleShops = [];
+    for (const doc of snapshot.docs) {
+      const shopData = doc.data();
+      const zikrinterServices = shopData.zikrinterServices || {};
+      const serviceConfig = zikrinterServices[serviceId];
+
+      const isBlocked = shopData.isBlocked === true;
+      const isAcceptingOrders = shopData.isAcceptingOrders !== false;
+
+      if (!serviceConfig ||
+          serviceConfig.isEnabled !== true ||
+          isBlocked ||
+          !isAcceptingOrders) {
+        continue;
+      }
+
+      const paperSizesConfig = serviceConfig.paperSizes || {};
+      const sizeConfig = paperSizesConfig[sizeKey];
+
+      let bwPrice = 0.0;
+      let colorPrice = 0.0;
+      if (sizeConfig) {
+        bwPrice = Number(sizeConfig.bw?.singleSidePrice) || 0.0;
+        colorPrice = Number(sizeConfig.color?.singleSidePrice) || 0.0;
+      } else {
+        bwPrice = Number(serviceConfig[`${sizeKey}_bw_singleSidePrice`]) || 0.0;
+        colorPrice = Number(serviceConfig[`${sizeKey}_color_singleSidePrice`]) || 0.0;
+        if (sizeKey === 'a4') {
+          bwPrice = Number(serviceConfig.bw_singleSidePrice) || bwPrice;
+          colorPrice = Number(serviceConfig.color_singleSidePrice) || Number(serviceConfig.singleSidePrice) || colorPrice;
+        }
+      }
+
+      const bwSingleGlobal = globalParams[`${sizeKey}_bw_singleSide`] || globalParams.bw_singleSide || {};
+      const colorSingleGlobal = globalParams[`${sizeKey}_color_singleSide`] || globalParams.color_singleSide || {};
+      const isBwEnabledGlobally = bwSingleGlobal.isEnabled === true || globalParams.bw_singleSide?.isEnabled === true;
+      const isColorEnabledGlobally = colorSingleGlobal.isEnabled === true || globalParams.color_singleSide?.isEnabled === true;
+
+      const isBwConfigured = !isBwEnabledGlobally || bwPrice > 0.0;
+      const isColorConfigured = !isColorEnabledGlobally || colorPrice > 0.0;
+
+      if (isBwConfigured && isColorConfigured && (bwPrice > 0.0 || colorPrice > 0.0)) {
+        const printersSnapshot = await doc.ref.collection("printers").where("isOnline", "==", true).get();
+        
+        eligibleShops.push({
+          id: doc.id,
+          ...shopData,
+          activePrinters: printersSnapshot.size,
+        });
+      }
+    }
+
+    res.json({ success: true, shops: eligibleShops });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/shop/services", async (req, res, next) => {
+  try {
+    const shopId = req.query.shopId;
+    if (!shopId) return res.status(400).json({ success: false, error: "shopId required" });
+
+    const shopDoc = await dbAdmin.collection("shops").doc(shopId).get();
+    if (!shopDoc.exists) return res.status(404).json({ success: false, error: "Shop not found" });
+
+    const shopData = shopDoc.data();
+    const zikrinterServices = shopData.zikrinterServices || {};
+
+    const snapshot = await dbCustomer.collection("services").get();
+    const services = [];
+    snapshot.forEach(doc => {
+      const data = doc.data();
+      if (data.isDeleted !== true) {
+        services.push({
+          id: doc.id,
+          ...data,
+          shopConfig: zikrinterServices[doc.id] || null,
+        });
+      }
+    });
+
+    res.json({ success: true, shop: { id: shopDoc.id, ...shopData }, services });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/shop/pending-paper-sizes", async (req, res, next) => {
+  try {
+    const shopId = req.query.shopId;
+    if (!shopId) return res.status(400).json({ success: false, error: "shopId required" });
+
+    const shopDoc = await dbAdmin.collection("shops").doc(shopId).get();
+    if (!shopDoc.exists) return res.status(404).json({ success: false, error: "Shop not found" });
+
+    const shopData = shopDoc.data();
+    const zikrinterServices = shopData.zikrinterServices || {};
+
+    const snapshot = await dbCustomer.collection("services").get();
+    const pending = {};
+
+    snapshot.forEach(doc => {
+      const serviceId = doc.id;
+      const data = doc.data();
+      if (data.isDeleted === true) return;
+
+      const globalSizes = data.paperSizes || ["A4"];
+      const globalParams = data.parameters || {};
+      const shopConfig = zikrinterServices[serviceId];
+
+      if (shopConfig && shopConfig.isEnabled === true) {
+        const missing = [];
+        for (const size of globalSizes) {
+          const sizeKey = size.toLowerCase();
+          
+          const bwSingleGlobal = globalParams[`${sizeKey}_bw_singleSide`] || globalParams.bw_singleSide || {};
+          const colorSingleGlobal = globalParams[`${sizeKey}_color_singleSide`] || globalParams.color_singleSide || {};
+          const isBwEnabledGlobally = bwSingleGlobal.isEnabled === true || globalParams.bw_singleSide?.isEnabled === true;
+          const isColorEnabledGlobally = colorSingleGlobal.isEnabled === true || globalParams.color_singleSide?.isEnabled === true;
+
+          const sizeConfig = shopConfig.paperSizes?.[sizeKey];
+          let bwPrice = 0.0;
+          let colorPrice = 0.0;
+          if (sizeConfig) {
+            bwPrice = Number(sizeConfig.bw?.singleSidePrice) || 0.0;
+            colorPrice = Number(sizeConfig.color?.singleSidePrice) || 0.0;
+          } else {
+            bwPrice = Number(shopConfig[`${sizeKey}_bw_singleSidePrice`]) || 0.0;
+            colorPrice = Number(shopConfig[`${sizeKey}_color_singleSidePrice`]) || 0.0;
+            if (sizeKey === 'a4') {
+              bwPrice = Number(shopConfig.bw_singleSidePrice) || bwPrice;
+              colorPrice = Number(shopConfig.color_singleSidePrice) || Number(shopConfig.singleSidePrice) || colorPrice;
+            }
+          }
+
+          const isBwMissing = isBwEnabledGlobally && bwPrice <= 0.0;
+          const isColorMissing = isColorEnabledGlobally && colorPrice <= 0.0;
+
+          if (isBwMissing || isColorMissing) {
+            missing.push(size);
+          }
+        }
+        if (missing.length > 0) {
+          pending[serviceId] = missing;
+        }
+      }
+    });
+
+    res.json({ success: true, pending });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/shop/pricing", async (req, res, next) => {
+  try {
+    const { shopId, serviceId, isEnabled, pricingData } = req.body;
+    if (!shopId || !serviceId) {
+      return res.status(400).json({ success: false, error: "shopId and serviceId are required" });
+    }
+
+    const updateData = {};
+    if (isEnabled !== undefined) {
+      updateData[`zikrinterServices.${serviceId}.isEnabled`] = isEnabled;
+    }
+
+    if (pricingData) {
+      Object.keys(pricingData).forEach(sizeKey => {
+        const config = pricingData[sizeKey];
+        updateData[`zikrinterServices.${serviceId}.paperSizes.${sizeKey}`] = config;
+
+        const bwSingle = Number(config.bw?.singleSidePrice) || 0.0;
+        const bwDouble = Number(config.bw?.doubleSidePrice) || 0.0;
+        const bwBulk = Number(config.bw?.bulkPrintingPrice) || 0.0;
+
+        const colorSingle = Number(config.color?.singleSidePrice) || 0.0;
+        const colorDouble = Number(config.color?.doubleSidePrice) || 0.0;
+        const colorBulk = Number(config.color?.bulkPrintingPrice) || 0.0;
+
+        updateData[`zikrinterServices.${serviceId}.${sizeKey}_bw_singleSidePrice`] = bwSingle;
+        updateData[`zikrinterServices.${serviceId}.${sizeKey}_bw_doubleSidePrice`] = bwDouble;
+        updateData[`zikrinterServices.${serviceId}.${sizeKey}_bw_bulkPrintingPrice`] = bwBulk;
+        updateData[`zikrinterServices.${serviceId}.${sizeKey}_color_singleSidePrice`] = colorSingle;
+        updateData[`zikrinterServices.${serviceId}.${sizeKey}_color_doubleSidePrice`] = colorDouble;
+        updateData[`zikrinterServices.${serviceId}.${sizeKey}_color_bulkPrintingPrice`] = colorBulk;
+
+        if (sizeKey === 'a4') {
+          updateData[`zikrinterServices.${serviceId}.bw_singleSidePrice`] = bwSingle;
+          updateData[`zikrinterServices.${serviceId}.bw_doubleSidePrice`] = bwDouble;
+          updateData[`zikrinterServices.${serviceId}.bw_bulkPrintingPrice`] = bwBulk;
+          updateData[`zikrinterServices.${serviceId}.color_singleSidePrice`] = colorSingle;
+          updateData[`zikrinterServices.${serviceId}.color_doubleSidePrice`] = colorDouble;
+          updateData[`zikrinterServices.${serviceId}.color_bulkPrintingPrice`] = colorBulk;
+          updateData[`zikrinterServices.${serviceId}.singleSidePrice`] = colorSingle;
+          updateData[`zikrinterServices.${serviceId}.doubleSidePrice`] = colorDouble;
+          updateData[`zikrinterServices.${serviceId}.bulkPrintingPrice`] = colorBulk;
+        }
+      });
+    }
+
+    updateData[`zikrinterServices.${serviceId}.updatedAt`] = admin.firestore.FieldValue.serverTimestamp();
+
+    await dbAdmin.collection("shops").doc(shopId).update(updateData);
+    
+    await incrementServiceVersion();
+
+    res.json({ success: true, message: "Shop pricing configured successfully" });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ============================================================================
+// ENDPOINT: DYNAMIC PRICING CALCULATION API
+// ============================================================================
+app.post("/api/pricing/calculate", async (req, res, next) => {
+  try {
+    const { shopId, serviceId, paperSize, copies, pages, printType, isPortrait, isColor } = req.body;
+    if (!shopId || !serviceId || !paperSize) {
+      return res.status(400).json({ success: false, error: "shopId, serviceId, and paperSize are required" });
+    }
+
+    const numCopies = Number(copies) || 1;
+    const numPages = Number(pages) || 1;
+    const sizeKey = paperSize.toLowerCase();
+
+    const shopDoc = await dbAdmin.collection("shops").doc(shopId).get();
+    if (!shopDoc.exists) return res.status(404).json({ success: false, error: "Shop not found" });
+
+    const shopData = shopDoc.data();
+    const zikrinterServices = shopData.zikrinterServices || {};
+    const serviceConfig = zikrinterServices[serviceId] || {};
+
+    const serviceDoc = await dbCustomer.collection("services").doc(serviceId).get();
+    if (!serviceDoc.exists || serviceDoc.data().isDeleted === true) {
+      return res.status(404).json({ success: false, error: "Service not found" });
+    }
+    const globalParams = serviceDoc.data().parameters || {};
+
+    const paperSizesConfig = serviceConfig.paperSizes || {};
+    const sizeConfig = paperSizesConfig[sizeKey];
+
+    let bwSingle = 2.0;
+    let bwDouble = 3.0;
+    let bwBulk = 1.5;
+
+    let colorSingle = 10.0;
+    let colorDouble = 15.0;
+    let colorBulk = 8.0;
+
+    if (sizeConfig) {
+      bwSingle = Number(sizeConfig.bw?.singleSidePrice) || bwSingle;
+      bwDouble = Number(sizeConfig.bw?.doubleSidePrice) || bwDouble;
+      bwBulk = Number(sizeConfig.bw?.bulkPrintingPrice) || bwBulk;
+
+      colorSingle = Number(sizeConfig.color?.singleSidePrice) || colorSingle;
+      colorDouble = Number(sizeConfig.color?.doubleSidePrice) || colorDouble;
+      colorBulk = Number(sizeConfig.color?.bulkPrintingPrice) || colorBulk;
+    } else {
+      bwSingle = Number(serviceConfig[`${sizeKey}_bw_singleSidePrice`]) || bwSingle;
+      bwDouble = Number(serviceConfig[`${sizeKey}_bw_doubleSidePrice`]) || bwDouble;
+      bwBulk = Number(serviceConfig[`${sizeKey}_bw_bulkPrintingPrice`]) || bwBulk;
+
+      colorSingle = Number(serviceConfig[`${sizeKey}_color_singleSidePrice`]) || colorSingle;
+      colorDouble = Number(serviceConfig[`${sizeKey}_color_doubleSidePrice`]) || colorDouble;
+      colorBulk = Number(serviceConfig[`${sizeKey}_color_bulkPrintingPrice`]) || colorBulk;
+
+      if (sizeKey === 'a4') {
+        bwSingle = Number(serviceConfig.bw_singleSidePrice) || bwSingle;
+        bwDouble = Number(serviceConfig.bw_doubleSidePrice) || bwDouble;
+        bwBulk = Number(serviceConfig.bw_bulkPrintingPrice) || bwBulk;
+        colorSingle = Number(serviceConfig.color_singleSidePrice) || Number(serviceConfig.singleSidePrice) || colorSingle;
+        colorDouble = Number(serviceConfig.color_doubleSidePrice) || colorDouble;
+        colorBulk = Number(serviceConfig.color_bulkPrintingPrice) || colorBulk;
+      }
+    }
+
+    let rate = isColor ? colorSingle : bwSingle;
+    if (printType === 'doubleSide') {
+      rate = isColor ? colorDouble : bwDouble;
+    }
+
+    const bwBulkStart = Number(globalParams[`${sizeKey}_bw_bulkStartPages`] || globalParams.bw_bulkStartPages || 10);
+    const colorBulkStart = Number(globalParams[`${sizeKey}_color_bulkStartPages`] || globalParams.color_bulkStartPages || 10);
+    const bulkStart = isColor ? colorBulkStart : bwBulkStart;
+    const bulkRate = isColor ? colorBulk : bwBulk;
+
+    if (numPages >= bulkStart && bulkRate > 0) {
+      rate = bulkRate;
+    }
+
+    const baseCost = rate * numPages * numCopies;
+
+    const bwSingleGlobal = globalParams[`${sizeKey}_bw_singleSide`] || globalParams.bw_singleSide || {};
+    const colorSingleGlobal = globalParams[`${sizeKey}_color_singleSide`] || globalParams.color_singleSide || {};
+    
+    let commType = serviceDoc.data().commissionType || 'percentage';
+    let commVal = Number(serviceDoc.data().commissionValue) || 0.0;
+
+    if (serviceDoc.data().commissionValue === undefined) {
+      const selectedGlobal = isColor ? colorSingleGlobal : bwSingleGlobal;
+      commType = selectedGlobal.commissionType || commType;
+      commVal = Number(selectedGlobal.commission) || commVal;
+    }
+
+    let commission = 0.0;
+    if (commType === 'percentage') {
+      commission = baseCost * (commVal / 100);
+    } else {
+      commission = commVal * numPages * numCopies;
+    }
+
+    const platformFee = 1.0;
+    const finalAmount = baseCost + commission + platformFee;
+
+    res.json({
+      success: true,
+      breakdown: {
+        paperSize,
+        copies: numCopies,
+        pages: numPages,
+        printType,
+        isPortrait,
+        isColor,
+        rate,
+        baseCost,
+        commissionType: commType,
+        commissionValue: commVal,
+        commission,
+        platformFee,
+        finalAmount,
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // ============================================================================
 // 404 HANDLER (MUST BE LAST)
 // ============================================================================
