@@ -8,7 +8,7 @@ const crypto = require("crypto");
 // ============================================================================
 // INTERNAL MODULES
 // ============================================================================
-const { dbCustomer: db, dbAdmin, admin } = require("./firebase");
+const { db, dbCustomer, dbAdmin, admin } = require("./firebase");
 const { cloudinary, configB } = require("./cloudinary");
 const razorpayInstance = require("./razorpay");
 const { performCleanup, cleanupOrder, deleteOrderFilesFromCloudinary } = require("./cleanup");
