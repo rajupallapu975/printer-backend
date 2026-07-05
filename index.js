@@ -139,6 +139,21 @@ app.post("/verify-payment", async (req, res, next) => {
       totalPages,
       customId
     } = req.body;
+
+    console.log(`\n💳 [Verify Payment Step]`);
+    console.log(`   - Selected Shop ID: ${printSettings.shopId} (${printSettings.shopName})`);
+    console.log(`   - Custom ID: ${customId}`);
+    console.log(`   - Total Paid Amount: ₹${amount}`);
+    console.log(`   - Total Pages: ${totalPages}`);
+    console.log(`   - User ID: ${userId || 'guest_user'}`);
+    console.log(`   - User Email: ${userEmail || 'N/A'}`);
+    if (printSettings.files && Array.isArray(printSettings.files)) {
+      console.log(`   - Files:`);
+      printSettings.files.forEach(f => {
+        console.log(`     * ${f.fileName} (${f.paperSize}, ${f.pageCount} pages, ${f.copies} copies, ${f.color}, ${f.doubleSided ? 'Double Sided' : 'Single Sided'})`);
+      });
+    }
+
     if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
       return res.status(400).json({ error: "Payment details missing" });
     }
@@ -196,6 +211,17 @@ app.post("/verify-payment", async (req, res, next) => {
 app.post("/complete-order", async (req, res, next) => {
   try {
     const { orderId, fileUrls, publicIds, printMode } = req.body;
+    
+    console.log(`\n📂 [File Upload Completion Step]`);
+    console.log(`   - Order ID: ${orderId}`);
+    console.log(`   - Print Mode: ${printMode}`);
+    if (fileUrls && Array.isArray(fileUrls)) {
+      console.log(`   - Uploaded Cloudinary URLs:`);
+      fileUrls.forEach((url, i) => {
+        console.log(`     * File ${i+1}: ${url}`);
+      });
+    }
+
     if (!orderId) return res.status(400).json({ error: "orderId required" });
     
     // 🛠️ Collection and config
@@ -700,7 +726,7 @@ app.get("/api/config/version", async (req, res, next) => {
 // ============================================================================
 app.get("/api/services", async (req, res, next) => {
   try {
-    const snapshot = await dbCustomer.collection("zikrinter").get();
+    const snapshot = await dbCustomer.collection("services").get();
     const services = [];
     snapshot.forEach(doc => {
       const data = doc.data();
@@ -716,7 +742,7 @@ app.get("/api/services", async (req, res, next) => {
 
 app.get("/api/services/:id", async (req, res, next) => {
   try {
-    const doc = await dbCustomer.collection("zikrinter").doc(req.params.id).get();
+    const doc = await dbCustomer.collection("services").doc(req.params.id).get();
     if (!doc.exists || doc.data().isDeleted === true) {
       return res.status(404).json({ success: false, error: "Service not found" });
     }
@@ -733,7 +759,7 @@ app.post("/api/services", async (req, res, next) => {
       return res.status(400).json({ success: false, error: "Service name is required" });
     }
 
-    const docId = serviceData.id || dbCustomer.collection("zikrinter").doc().id;
+    const docId = serviceData.id || dbCustomer.collection("services").doc().id;
     const timestamp = admin.firestore.FieldValue.serverTimestamp();
     const newService = {
       id: docId,
@@ -753,8 +779,8 @@ app.post("/api/services", async (req, res, next) => {
       updatedBy: serviceData.updatedBy || "system_admin",
     };
 
-    await dbCustomer.collection("zikrinter").doc(docId).set(newService);
-    await dbAdmin.collection("zikrinter").doc(docId).set(newService);
+    await dbCustomer.collection("services").doc(docId).set(newService);
+    await dbAdmin.collection("services").doc(docId).set(newService);
 
     await dbCustomer.collection("service_audit_logs").add({
       serviceId: docId,
@@ -777,7 +803,7 @@ app.put("/api/services/:id", async (req, res, next) => {
     const docId = req.params.id;
     const serviceData = req.body;
 
-    const docRef = dbCustomer.collection("zikrinter").doc(docId);
+    const docRef = dbCustomer.collection("services").doc(docId);
     const docSnapshot = await docRef.get();
     if (!docSnapshot.exists) {
       return res.status(404).json({ success: false, error: "Service not found" });
@@ -803,8 +829,8 @@ app.put("/api/services/:id", async (req, res, next) => {
       updatedBy: serviceData.updatedBy || "system_admin",
     };
 
-    await dbCustomer.collection("zikrinter").doc(docId).set(updatedService);
-    await dbAdmin.collection("zikrinter").doc(docId).set(updatedService);
+    await dbCustomer.collection("services").doc(docId).set(updatedService);
+    await dbAdmin.collection("services").doc(docId).set(updatedService);
 
     await dbCustomer.collection("service_audit_logs").add({
       serviceId: docId,
@@ -825,7 +851,7 @@ app.put("/api/services/:id", async (req, res, next) => {
 app.delete("/api/services/:id", async (req, res, next) => {
   try {
     const docId = req.params.id;
-    const docRef = dbCustomer.collection("zikrinter").doc(docId);
+    const docRef = dbCustomer.collection("services").doc(docId);
     const docSnapshot = await docRef.get();
     if (!docSnapshot.exists) {
       return res.status(404).json({ success: false, error: "Service not found" });
@@ -843,8 +869,8 @@ app.delete("/api/services/:id", async (req, res, next) => {
       version: currentVersion + 1,
     };
 
-    await dbCustomer.collection("zikrinter").doc(docId).set(deletedService);
-    await dbAdmin.collection("zikrinter").doc(docId).set(deletedService);
+    await dbCustomer.collection("services").doc(docId).set(deletedService);
+    await dbAdmin.collection("services").doc(docId).set(deletedService);
 
     await dbCustomer.collection("service_audit_logs").add({
       serviceId: docId,
@@ -874,29 +900,48 @@ app.get("/api/services/:id/shops", async (req, res, next) => {
     }
     const sizeKey = paperSize.toLowerCase();
 
-    const snapshot = await dbAdmin.collection("shops")
-      .where("isActive", "==", true)
-      .get();
+    const snapshot = await dbAdmin.collection("shops").get();
 
-    const serviceDoc = await dbCustomer.collection("zikrinter").doc(serviceId).get();
+    const serviceDoc = await dbCustomer.collection("services").doc(serviceId).get();
     if (!serviceDoc.exists || serviceDoc.data().isDeleted === true) {
       return res.status(404).json({ success: false, error: "Service not found" });
     }
     const globalParams = serviceDoc.data().parameters || {};
 
+    console.log(`\n🔍 [Shop Search] Querying eligible shops for Service ID: ${serviceId}, Paper Size: ${paperSize}`);
     const eligibleShops = [];
     for (const doc of snapshot.docs) {
       const shopData = doc.data();
+      const shopName = shopData.shopName || "Unknown Shop";
       const zikrinterServices = shopData.zikrinterServices || {};
       const serviceConfig = zikrinterServices[serviceId];
 
       const isBlocked = shopData.isBlocked === true;
       const isAcceptingOrders = shopData.isAcceptingOrders !== false;
+      const isOpen = shopData.isOpen === true;
 
-      if (!serviceConfig ||
-          serviceConfig.isEnabled !== true ||
-          isBlocked ||
-          !isAcceptingOrders) {
+      if (shopData.isActive === false) {
+        console.log(` ❌ Shop [${shopName}] is deactivated.`);
+        continue;
+      }
+      if (!isOpen) {
+        console.log(` ❌ Shop [${shopName}] is offline (isOpen = false).`);
+        continue;
+      }
+      if (isBlocked) {
+        console.log(` ❌ Shop [${shopName}] is blocked.`);
+        continue;
+      }
+      if (!isAcceptingOrders) {
+        console.log(` ❌ Shop [${shopName}] is not accepting orders.`);
+        continue;
+      }
+      if (!serviceConfig) {
+        console.log(` ❌ Shop [${shopName}] has not configured this service.`);
+        continue;
+      }
+      if (serviceConfig.isEnabled !== true) {
+        console.log(` ❌ Shop [${shopName}] has disabled this service.`);
         continue;
       }
 
@@ -928,13 +973,18 @@ app.get("/api/services/:id/shops", async (req, res, next) => {
       if (isBwConfigured && isColorConfigured && (bwPrice > 0.0 || colorPrice > 0.0)) {
         const printersSnapshot = await doc.ref.collection("printers").where("isOnline", "==", true).get();
         
+        console.log(` ✅ Shop [${shopName}] is ELIGIBLE. BW Price: ₹${bwPrice}, Color Price: ₹${colorPrice}, Active Printers: ${printersSnapshot.size}`);
+
         eligibleShops.push({
           id: doc.id,
           ...shopData,
           activePrinters: printersSnapshot.size,
         });
+      } else {
+        console.log(` ❌ Shop [${shopName}] - Pricing not fully configured for paper size [${sizeKey}].`);
       }
     }
+    console.log(`🔍 [Shop Search] Query complete. Found ${eligibleShops.length} eligible shop(s).\n`);
 
     res.json({ success: true, shops: eligibleShops });
   } catch (error) {
@@ -953,7 +1003,7 @@ app.get("/api/shop/services", async (req, res, next) => {
     const shopData = shopDoc.data();
     const zikrinterServices = shopData.zikrinterServices || {};
 
-    const snapshot = await dbCustomer.collection("zikrinter").get();
+    const snapshot = await dbCustomer.collection("services").get();
     const services = [];
     snapshot.forEach(doc => {
       const data = doc.data();
@@ -972,6 +1022,25 @@ app.get("/api/shop/services", async (req, res, next) => {
   }
 });
 
+app.get("/api/shop/:id/status", async (req, res, next) => {
+  try {
+    const shopDoc = await dbAdmin.collection("shops").doc(req.params.id).get();
+    if (!shopDoc.exists) {
+      return res.status(404).json({ success: false, isOpen: false, error: "Shop not found" });
+    }
+    const data = shopDoc.data();
+    res.json({
+      success: true,
+      isOpen: data.isOpen === true,
+      isAcceptingOrders: data.isAcceptingOrders !== false,
+      isBlocked: data.isBlocked === true,
+      isActive: data.isActive !== false
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get("/api/shop/pending-paper-sizes", async (req, res, next) => {
   try {
     const shopId = req.query.shopId;
@@ -983,7 +1052,7 @@ app.get("/api/shop/pending-paper-sizes", async (req, res, next) => {
     const shopData = shopDoc.data();
     const zikrinterServices = shopData.zikrinterServices || {};
 
-    const snapshot = await dbCustomer.collection("zikrinter").get();
+    const snapshot = await dbCustomer.collection("services").get();
     const pending = {};
 
     snapshot.forEach(doc => {
@@ -1118,7 +1187,7 @@ app.post("/api/pricing/calculate", async (req, res, next) => {
     const zikrinterServices = shopData.zikrinterServices || {};
     const serviceConfig = zikrinterServices[serviceId] || {};
 
-    const serviceDoc = await dbCustomer.collection("zikrinter").doc(serviceId).get();
+    const serviceDoc = await dbCustomer.collection("services").doc(serviceId).get();
     if (!serviceDoc.exists || serviceDoc.data().isDeleted === true) {
       return res.status(404).json({ success: false, error: "Service not found" });
     }
@@ -1246,9 +1315,42 @@ app.use((err, req, res, next) => {
 });
 // Note: Scheduled cleanup consolidated at the top of the file
 // ============================================================================
+// ============================================================================
 // START SERVER
 // ============================================================================
 const PORT = process.env.PORT || 5000;
+
+async function printActiveShopsOnStartup() {
+  try {
+    const servicesSnapshot = await dbCustomer.collection("services").get();
+    const activeServiceIds = new Set();
+    servicesSnapshot.forEach(doc => {
+      const data = doc.data();
+      if (data.isDeleted !== true) {
+        activeServiceIds.add(doc.id);
+      }
+    });
+
+    const snapshot = await dbAdmin.collection("shops").get();
+    console.log("\n🏪 ================= ACTIVE SHOPS SUMMARY =================");
+    snapshot.forEach(doc => {
+      const data = doc.data();
+      if (doc.id === "serviceVersion") return;
+      const isOpen = data.isOpen === true;
+      const services = Object.keys(data.zikrinterServices || {})
+        .filter(id => data.zikrinterServices[id].isEnabled === true && activeServiceIds.has(id));
+      if (isOpen) {
+        console.log(` 🟢 Shop: ${data.shopName || doc.id} is ONLINE. Enabled Services: [${services.join(", ")}]`);
+      } else {
+        console.log(` 🔴 Shop: ${data.shopName || doc.id} is OFFLINE.`);
+      }
+    });
+    console.log("============================================================\n");
+  } catch (err) {
+    console.error("Error printing active shops summary:", err.message);
+  }
+}
+
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`
 ╔════════════════════════════════════════════════════════════╗
@@ -1260,4 +1362,5 @@ app.listen(PORT, '0.0.0.0', () => {
 ║                                                            ║
 ╚════════════════════════════════════════════════════════════╝
   `);
+  printActiveShopsOnStartup();
 });

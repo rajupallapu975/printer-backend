@@ -49,6 +49,9 @@ async function calculatePricingBreakdown(printSettings) {
     }
   }
 
+  const paperSize = printSettings.paperSize || (printSettings.files && printSettings.files[0] && printSettings.files[0].paperSize) || 'A4';
+  const sizeKey = paperSize.toLowerCase();
+
   // 1. Fallback defaults
   let colorSinglePrice = 10.0;
   let colorDoublePrice = 15.0;
@@ -62,22 +65,45 @@ async function calculatePricingBreakdown(printSettings) {
 
   // 2. Overwrite with shop specific prices if loaded
   if (shopConfig) {
-    colorSinglePrice = Number(shopConfig.color_singleSidePrice ?? shopConfig.singleSidePrice ?? colorSinglePrice);
-    colorDoublePrice = Number(shopConfig.color_doubleSidePrice ?? shopConfig.doubleSidePrice ?? colorDoublePrice);
-    colorBulkPrice = Number(shopConfig.color_bulkPrintingPrice ?? shopConfig.bulkPrintingPrice ?? colorBulkPrice);
+    const paperSizesConfig = shopConfig.paperSizes || {};
+    const sizeConfig = paperSizesConfig[sizeKey];
 
-    bwSinglePrice = Number(shopConfig.bw_singleSidePrice ?? bwSinglePrice);
-    bwDoublePrice = Number(shopConfig.bw_doubleSidePrice ?? bwDoublePrice);
-    bwBulkPrice = Number(shopConfig.bw_bulkPrintingPrice ?? bwBulkPrice);
+    if (sizeConfig) {
+      bwSinglePrice = Number(sizeConfig.bw?.singleSidePrice) || bwSinglePrice;
+      bwDoublePrice = Number(sizeConfig.bw?.doubleSidePrice) || bwDoublePrice;
+      bwBulkPrice = Number(sizeConfig.bw?.bulkPrintingPrice) || bwBulkPrice;
+
+      colorSinglePrice = Number(sizeConfig.color?.singleSidePrice) || colorSinglePrice;
+      colorDoublePrice = Number(sizeConfig.color?.doubleSidePrice) || colorDoublePrice;
+      colorBulkPrice = Number(sizeConfig.color?.bulkPrintingPrice) || colorBulkPrice;
+    } else {
+      bwSinglePrice = Number(shopConfig[`${sizeKey}_bw_singleSidePrice`]) || bwSinglePrice;
+      bwDoublePrice = Number(shopConfig[`${sizeKey}_bw_doubleSidePrice`]) || bwDoublePrice;
+      bwBulkPrice = Number(shopConfig[`${sizeKey}_bw_bulkPrintingPrice`]) || bwBulkPrice;
+
+      colorSinglePrice = Number(shopConfig[`${sizeKey}_color_singleSidePrice`]) || colorSinglePrice;
+      colorDoublePrice = Number(shopConfig[`${sizeKey}_color_doubleSidePrice`]) || colorDoublePrice;
+      colorBulkPrice = Number(shopConfig[`${sizeKey}_color_bulkPrintingPrice`]) || colorBulkPrice;
+
+      if (sizeKey === 'a4') {
+        colorSinglePrice = Number(shopConfig.color_singleSidePrice ?? shopConfig.singleSidePrice ?? colorSinglePrice);
+        colorDoublePrice = Number(shopConfig.color_doubleSidePrice ?? shopConfig.doubleSidePrice ?? colorDoublePrice);
+        colorBulkPrice = Number(shopConfig.color_bulkPrintingPrice ?? shopConfig.bulkPrintingPrice ?? colorBulkPrice);
+
+        bwSinglePrice = Number(shopConfig.bw_singleSidePrice ?? bwSinglePrice);
+        bwDoublePrice = Number(shopConfig.bw_doubleSidePrice ?? bwDoublePrice);
+        bwBulkPrice = Number(shopConfig.bw_bulkPrintingPrice ?? bwBulkPrice);
+      }
+    }
   }
 
   // 3. Overwrite bulk setPages from global parameters if loaded
   if (globalParams) {
-    const colorBulkGlobal = globalParams.color_bulkPrinting || globalParams.bulkPrinting;
+    const colorBulkGlobal = globalParams[`${sizeKey}_color_bulkPrinting`] || globalParams.color_bulkPrinting || globalParams.bulkPrinting;
     if (colorBulkGlobal && colorBulkGlobal.setPages != null) {
       colorBulkSetPages = Number(colorBulkGlobal.setPages);
     }
-    const bwBulkGlobal = globalParams.bw_bulkPrinting;
+    const bwBulkGlobal = globalParams[`${sizeKey}_bw_bulkPrinting`] || globalParams.bw_bulkPrinting;
     if (bwBulkGlobal && bwBulkGlobal.setPages != null) {
       bwBulkSetPages = Number(bwBulkGlobal.setPages);
     }
