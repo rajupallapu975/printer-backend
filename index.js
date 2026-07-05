@@ -677,13 +677,13 @@ app.post("/set-shop-status", async (req, res, next) => {
 // ============================================================================
 async function incrementServiceVersion() {
   const increment = admin.firestore.FieldValue.increment(1);
-  await dbCustomer.collection("config").doc("serviceVersion").set({ version: increment }, { merge: true });
-  await dbAdmin.collection("config").doc("serviceVersion").set({ version: increment }, { merge: true });
+  await dbCustomer.collection("shops").doc("serviceVersion").set({ version: increment }, { merge: true });
+  await dbAdmin.collection("shops").doc("serviceVersion").set({ version: increment }, { merge: true });
 }
 
 app.get("/api/config/version", async (req, res, next) => {
   try {
-    const docRef = dbCustomer.collection("config").doc("serviceVersion");
+    const docRef = dbCustomer.collection("shops").doc("serviceVersion");
     const doc = await docRef.get();
     if (!doc.exists) {
       await docRef.set({ version: 1 });
