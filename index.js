@@ -700,7 +700,7 @@ app.get("/api/config/version", async (req, res, next) => {
 // ============================================================================
 app.get("/api/services", async (req, res, next) => {
   try {
-    const snapshot = await dbCustomer.collection("services").get();
+    const snapshot = await dbCustomer.collection("zikrinter").get();
     const services = [];
     snapshot.forEach(doc => {
       const data = doc.data();
@@ -716,7 +716,7 @@ app.get("/api/services", async (req, res, next) => {
 
 app.get("/api/services/:id", async (req, res, next) => {
   try {
-    const doc = await dbCustomer.collection("services").doc(req.params.id).get();
+    const doc = await dbCustomer.collection("zikrinter").doc(req.params.id).get();
     if (!doc.exists || doc.data().isDeleted === true) {
       return res.status(404).json({ success: false, error: "Service not found" });
     }
@@ -733,7 +733,7 @@ app.post("/api/services", async (req, res, next) => {
       return res.status(400).json({ success: false, error: "Service name is required" });
     }
 
-    const docId = serviceData.id || dbCustomer.collection("services").doc().id;
+    const docId = serviceData.id || dbCustomer.collection("zikrinter").doc().id;
     const timestamp = admin.firestore.FieldValue.serverTimestamp();
     const newService = {
       id: docId,
@@ -753,8 +753,8 @@ app.post("/api/services", async (req, res, next) => {
       updatedBy: serviceData.updatedBy || "system_admin",
     };
 
-    await dbCustomer.collection("services").doc(docId).set(newService);
-    await dbAdmin.collection("services").doc(docId).set(newService);
+    await dbCustomer.collection("zikrinter").doc(docId).set(newService);
+    await dbAdmin.collection("zikrinter").doc(docId).set(newService);
 
     await dbCustomer.collection("service_audit_logs").add({
       serviceId: docId,
@@ -777,7 +777,7 @@ app.put("/api/services/:id", async (req, res, next) => {
     const docId = req.params.id;
     const serviceData = req.body;
 
-    const docRef = dbCustomer.collection("services").doc(docId);
+    const docRef = dbCustomer.collection("zikrinter").doc(docId);
     const docSnapshot = await docRef.get();
     if (!docSnapshot.exists) {
       return res.status(404).json({ success: false, error: "Service not found" });
@@ -803,8 +803,8 @@ app.put("/api/services/:id", async (req, res, next) => {
       updatedBy: serviceData.updatedBy || "system_admin",
     };
 
-    await dbCustomer.collection("services").doc(docId).set(updatedService);
-    await dbAdmin.collection("services").doc(docId).set(updatedService);
+    await dbCustomer.collection("zikrinter").doc(docId).set(updatedService);
+    await dbAdmin.collection("zikrinter").doc(docId).set(updatedService);
 
     await dbCustomer.collection("service_audit_logs").add({
       serviceId: docId,
@@ -825,7 +825,7 @@ app.put("/api/services/:id", async (req, res, next) => {
 app.delete("/api/services/:id", async (req, res, next) => {
   try {
     const docId = req.params.id;
-    const docRef = dbCustomer.collection("services").doc(docId);
+    const docRef = dbCustomer.collection("zikrinter").doc(docId);
     const docSnapshot = await docRef.get();
     if (!docSnapshot.exists) {
       return res.status(404).json({ success: false, error: "Service not found" });
@@ -843,8 +843,8 @@ app.delete("/api/services/:id", async (req, res, next) => {
       version: currentVersion + 1,
     };
 
-    await dbCustomer.collection("services").doc(docId).set(deletedService);
-    await dbAdmin.collection("services").doc(docId).set(deletedService);
+    await dbCustomer.collection("zikrinter").doc(docId).set(deletedService);
+    await dbAdmin.collection("zikrinter").doc(docId).set(deletedService);
 
     await dbCustomer.collection("service_audit_logs").add({
       serviceId: docId,
@@ -878,7 +878,7 @@ app.get("/api/services/:id/shops", async (req, res, next) => {
       .where("isActive", "==", true)
       .get();
 
-    const serviceDoc = await dbCustomer.collection("services").doc(serviceId).get();
+    const serviceDoc = await dbCustomer.collection("zikrinter").doc(serviceId).get();
     if (!serviceDoc.exists || serviceDoc.data().isDeleted === true) {
       return res.status(404).json({ success: false, error: "Service not found" });
     }
@@ -953,7 +953,7 @@ app.get("/api/shop/services", async (req, res, next) => {
     const shopData = shopDoc.data();
     const zikrinterServices = shopData.zikrinterServices || {};
 
-    const snapshot = await dbCustomer.collection("services").get();
+    const snapshot = await dbCustomer.collection("zikrinter").get();
     const services = [];
     snapshot.forEach(doc => {
       const data = doc.data();
@@ -983,7 +983,7 @@ app.get("/api/shop/pending-paper-sizes", async (req, res, next) => {
     const shopData = shopDoc.data();
     const zikrinterServices = shopData.zikrinterServices || {};
 
-    const snapshot = await dbCustomer.collection("services").get();
+    const snapshot = await dbCustomer.collection("zikrinter").get();
     const pending = {};
 
     snapshot.forEach(doc => {
@@ -1118,7 +1118,7 @@ app.post("/api/pricing/calculate", async (req, res, next) => {
     const zikrinterServices = shopData.zikrinterServices || {};
     const serviceConfig = zikrinterServices[serviceId] || {};
 
-    const serviceDoc = await dbCustomer.collection("services").doc(serviceId).get();
+    const serviceDoc = await dbCustomer.collection("zikrinter").doc(serviceId).get();
     if (!serviceDoc.exists || serviceDoc.data().isDeleted === true) {
       return res.status(404).json({ success: false, error: "Service not found" });
     }
