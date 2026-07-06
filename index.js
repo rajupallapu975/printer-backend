@@ -342,7 +342,7 @@ app.post("/complete-order", async (req, res, next) => {
             const uploadStream = cloudinary.uploader.upload_stream({
                 folder: folderName,
                 public_id: coverFileName,
-                resource_type: 'raw',
+                resource_type: 'image',
                 access_mode: 'public',
                 overwrite: true,
                 invalidate: true,
@@ -357,7 +357,7 @@ app.post("/complete-order", async (req, res, next) => {
         try {
             await cloudinary.uploader.explicit(uploadResult.public_id, {
                 type: 'upload',
-                resource_type: 'raw',
+                resource_type: 'image',
                 access_mode: 'public',
                 invalidate: true
             });
