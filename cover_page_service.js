@@ -78,7 +78,7 @@ async function generateCoverPage(orderData) {
         color: rgb(1, 1, 1),
     });
     drawText("Print Smarter. Save Time.", 410, 778, 8, helveticaBold, rgb(0.1, 0.1, 0.1));
-    drawText("Upload • Pay • Print • Pickup", 410, 765, 7.5, helvetica, rgb(0.3, 0.3, 0.3));
+    drawText("Upload - Pay - Print - Pickup", 410, 765, 7.5, helvetica, rgb(0.3, 0.3, 0.3));
     drawText("All in One App!", 410, 753, 8.5, helveticaBold, rgb(0.1, 0.1, 0.1));
 
     // Section line divider
@@ -91,7 +91,7 @@ async function generateCoverPage(orderData) {
     drawCenteredText(`#${orderData.orderCode}`, 670, 36, helveticaBold, rgb(0.1, 0.1, 0.1));
 
     // SHOW THIS CODE container
-    const badgeText = "🛡️ SHOW THIS CODE AT THE SHOP TO PICK UP YOUR PRINT";
+    const badgeText = "SHOW THIS CODE AT THE SHOP TO PICK UP YOUR PRINT";
     const badgeWidth = helveticaBold.widthOfTextAtSize(badgeText, 8.5);
     const badgeX = (595.276 - (badgeWidth + 24)) / 2;
     page.drawRectangle({
@@ -110,7 +110,7 @@ async function generateCoverPage(orderData) {
     // -------------------------------------------------------------
     // SECTION 3: CUSTOMER DETAILS
     // -------------------------------------------------------------
-    drawCenteredText("👤 CUSTOMER DETAILS", 605, 10, helveticaBold, rgb(0.4, 0.4, 0.4));
+    drawCenteredText("CUSTOMER DETAILS", 605, 10, helveticaBold, rgb(0.4, 0.4, 0.4));
     drawCenteredText("Customer Name", 590, 8.5, helvetica, rgb(0.5, 0.5, 0.5));
     drawCenteredText(orderData.customerName || "Guest User", 572, 14, helveticaBold, rgb(0.1, 0.1, 0.1));
 
@@ -119,7 +119,7 @@ async function generateCoverPage(orderData) {
     // -------------------------------------------------------------
     // SECTION 4: ORDER SUMMARY TABLE
     // -------------------------------------------------------------
-    drawText("📄 ORDER SUMMARY", 35, 538, 10, helveticaBold, rgb(0.4, 0.4, 0.4));
+    drawText("ORDER SUMMARY", 35, 538, 10, helveticaBold, rgb(0.4, 0.4, 0.4));
 
     // Table coordinates
     const tableTop = 525;
@@ -174,7 +174,7 @@ async function generateCoverPage(orderData) {
             file.copies.toString(),
             file.pageCount.toString(),
             (file.pageCount * file.copies).toString(),
-            `₹${(file.price || 0.0).toFixed(2)}`
+            `Rs. ${(file.price || 0.0).toFixed(2)}`
         ];
 
         let colX = tableLeft;
@@ -208,7 +208,7 @@ async function generateCoverPage(orderData) {
     const totalPrintablePages = orderData.files.reduce((sum, f) => sum + (f.pageCount * f.copies), 0);
     const subtotalCost = orderData.files.reduce((sum, f) => sum + (f.price || 0.0), 0.0);
 
-    drawText("TOTAL PRINTABLE PAGES (Sum of Pages × Copies)", tableLeft + 150, currentY - 14, 8, helveticaBold, rgb(0.2, 0.2, 0.2));
+    drawText("TOTAL PRINTABLE PAGES (Sum of Pages x Copies)", tableLeft + 150, currentY - 14, 8, helveticaBold, rgb(0.2, 0.2, 0.2));
     
     const pagesValText = totalPrintablePages.toString();
     const pagesValWidth = helveticaBold.widthOfTextAtSize(pagesValText, 8.5);
@@ -221,7 +221,7 @@ async function generateCoverPage(orderData) {
         color: rgb(0.1, 0.1, 0.1)
     });
 
-    const priceValText = `₹${subtotalCost.toFixed(2)}`;
+    const priceValText = `Rs. ${subtotalCost.toFixed(2)}`;
     const priceValWidth = helveticaBold.widthOfTextAtSize(priceValText, 8.5);
     const priceColX = pagesColX + colWidths[4];
     page.drawText(priceValText, {
@@ -251,16 +251,16 @@ async function generateCoverPage(orderData) {
         borderWidth: 1,
         color: rgb(1, 1, 1),
     });
-    drawText("📋 ORDER INFORMATION", tableLeft + 12, cardY + 70, 9, helveticaBold, rgb(0.3, 0.3, 0.3));
+    drawText("ORDER INFORMATION", tableLeft + 12, cardY + 70, 9, helveticaBold, rgb(0.3, 0.3, 0.3));
     
-    drawText("📄 Total Files", tableLeft + 12, cardY + 50, 8.5, helvetica, rgb(0.4, 0.4, 0.4));
+    drawText("Total Files", tableLeft + 12, cardY + 50, 8.5, helvetica, rgb(0.4, 0.4, 0.4));
     drawText(orderData.files.length.toString(), tableLeft + 220, cardY + 50, 8.5, helveticaBold);
 
-    drawText("👤 Total Copies", tableLeft + 12, cardY + 32, 8.5, helvetica, rgb(0.4, 0.4, 0.4));
+    drawText("Total Copies", tableLeft + 12, cardY + 32, 8.5, helvetica, rgb(0.4, 0.4, 0.4));
     const totalCopiesCount = orderData.files.reduce((sum, f) => sum + f.copies, 0);
     drawText(totalCopiesCount.toString(), tableLeft + 220, cardY + 32, 8.5, helveticaBold);
 
-    drawText("🖨️ Total Printable Pages", tableLeft + 12, cardY + 14, 8.5, helvetica, rgb(0.4, 0.4, 0.4));
+    drawText("Total Printable Pages", tableLeft + 12, cardY + 14, 8.5, helvetica, rgb(0.4, 0.4, 0.4));
     drawText(totalPrintablePages.toString(), tableLeft + 220, cardY + 14, 8.5, helveticaBold);
 
     // Card 2: PRICE BREAKDOWN
@@ -274,15 +274,15 @@ async function generateCoverPage(orderData) {
         borderWidth: 1,
         color: rgb(1, 1, 1),
     });
-    drawText("🪙 PRICE BREAKDOWN", card2X + 12, cardY + 70, 9, helveticaBold, rgb(0.3, 0.3, 0.3));
+    drawText("PRICE BREAKDOWN", card2X + 12, cardY + 70, 9, helveticaBold, rgb(0.3, 0.3, 0.3));
 
     drawText("Subtotal (Printing Charges)", card2X + 12, cardY + 50, 8.5, helvetica, rgb(0.4, 0.4, 0.4));
-    const subtotalText = `₹${subtotalCost.toFixed(2)}`;
+    const subtotalText = `Rs. ${subtotalCost.toFixed(2)}`;
     const subtotalWidth = helveticaBold.widthOfTextAtSize(subtotalText, 8.5);
     page.drawText(subtotalText, { x: card2X + cardWidth - subtotalWidth - 12, y: cardY + 50, size: 8.5, font: helveticaBold });
 
     drawText("Extra Page Charge (Cover Page)", card2X + 12, cardY + 32, 8.5, helvetica, rgb(0.4, 0.4, 0.4));
-    const coverChargeText = `₹${(orderData.coverPageCharge || 2.0).toFixed(2)}`;
+    const coverChargeText = `Rs. ${(orderData.coverPageCharge || 2.0).toFixed(2)}`;
     const coverChargeWidth = helveticaBold.widthOfTextAtSize(coverChargeText, 8.5);
     page.drawText(coverChargeText, { x: card2X + cardWidth - coverChargeWidth - 12, y: cardY + 32, size: 8.5, font: helveticaBold });
 
@@ -290,7 +290,7 @@ async function generateCoverPage(orderData) {
 
     drawText("GRAND TOTAL", card2X + 12, cardY + 8, 9.5, helveticaBold, rgb(0.1, 0.1, 0.1));
     const grandTotalVal = subtotalCost + (orderData.coverPageCharge || 2.0);
-    const grandTotalText = `₹${grandTotalVal.toFixed(2)}`;
+    const grandTotalText = `Rs. ${grandTotalVal.toFixed(2)}`;
     const grandTotalWidth = helveticaBold.widthOfTextAtSize(grandTotalText, 10.5);
     
     page.drawRectangle({
@@ -345,19 +345,19 @@ async function generateCoverPage(orderData) {
     const workflowX = tableLeft + 180;
     const workflowSpacing = 55;
     const steps = [
-        { label: "Upload", sub: "your files", icon: "☁️" },
-        { label: "Secure", sub: "Payments", icon: "🔒" },
-        { label: "Print", sub: "Quality", icon: "🖨️" },
-        { label: "Easy", sub: "Pickup", icon: "📍" }
+        { label: "Upload", sub: "your files", icon: "STEP 1" },
+        { label: "Secure", sub: "Payments", icon: "STEP 2" },
+        { label: "Print", sub: "Quality", icon: "STEP 3" },
+        { label: "Easy", sub: "Pickup", icon: "STEP 4" }
     ];
 
     steps.forEach((step, idx) => {
         const xPos = workflowX + idx * workflowSpacing;
-        drawText(step.icon, xPos, footerY + 10, 12);
+        drawText(step.icon, xPos - 5, footerY + 10, 7, helveticaBold, rgb(0.4, 0.4, 0.4));
         drawText(step.label, xPos - 5, footerY - 2, 7.5, helveticaBold, rgb(0.2, 0.2, 0.2));
         drawText(step.sub, xPos - 5, footerY - 10, 6.5, helvetica, rgb(0.4, 0.4, 0.4));
         if (idx < steps.length - 1) {
-            drawText("→", xPos + 32, footerY + 3, 10, helveticaBold, rgb(0.6, 0.6, 0.6));
+            drawText("->", xPos + 32, footerY + 3, 9, helveticaBold, rgb(0.6, 0.6, 0.6));
         }
     });
 
