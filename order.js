@@ -177,10 +177,13 @@ async function calculatePricingBreakdown(printSettings) {
     platformCommission += fileCommission;
   }
 
+  // Round commission UP to nearest integer (e.g. ₹2.69 → ₹3)
+  const roundedCommission = Math.ceil(platformCommission);
+
   return {
     printingCost,
-    platformCommission,
-    totalAmount: printingCost + platformCommission + extraPageFee,
+    platformCommission: roundedCommission,
+    totalAmount: printingCost + roundedCommission + extraPageFee,
     shopPricingUsed: shopConfig || {},
     commissionType: primaryCommissionType,
     commissionValue: primaryCommissionValue,

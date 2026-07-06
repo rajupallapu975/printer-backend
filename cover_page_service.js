@@ -1,420 +1,262 @@
 const { PDFDocument, rgb, StandardFonts } = require('pdf-lib');
 
+// Pure B&W color palette — NO grey fills anywhere
+const BLACK  = rgb(0, 0, 0);
+const WHITE  = rgb(1, 1, 1);
+const GREY_BORDER = rgb(0.6, 0.6, 0.6);   // border lines only
+const GREY_TEXT   = rgb(0.3, 0.3, 0.3);   // secondary text only
+
 /**
- * Generates an enhanced ZIKRINT branded cover page PDF on the fly
+ * Generates a ZIKRINT cover page PDF — 100% black and white, printer-friendly
  */
 async function generateCoverPage(orderData) {
     const pdfDoc = await PDFDocument.create();
-    const page = pdfDoc.addPage([595.276, 841.89]); // A4 Size
+    const page = pdfDoc.addPage([595.276, 841.89]); // A4
     const helvetica = await pdfDoc.embedFont(StandardFonts.Helvetica);
     const helveticaBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
 
-    // Helper functions
-    const drawText = (text, x, y, size = 10, font = helvetica, color = rgb(0.1, 0.1, 0.1)) => {
-        page.drawText(text, { x, y, size, font, color });
+    // ── Helpers ──────────────────────────────────────────────────
+    const text = (str, x, y, size = 10, font = helvetica, color = BLACK) => {
+        page.drawText(str, { x, y, size, font, color });
     };
 
-    const drawCenteredText = (text, y, size = 10, font = helvetica, color = rgb(0.1, 0.1, 0.1)) => {
-        const textWidth = font.widthOfTextAtSize(text, size);
-        const x = (595.276 - textWidth) / 2;
-        page.drawText(text, { x, y, size, font, color });
+    const centeredText = (str, y, size = 10, font = helvetica, color = BLACK) => {
+        const w = font.widthOfTextAtSize(str, size);
+        page.drawText(str, { x: (595.276 - w) / 2, y, size, font, color });
     };
 
-    const drawLine = (startX, startY, endX, endY, thickness = 1, color = rgb(0.8, 0.8, 0.8), isDotted = false) => {
-        if (isDotted) {
-            const distance = Math.sqrt((endX - startX)**2 + (endY - startY)**2);
-            const dotSpacing = 4;
-            const numDots = Math.floor(distance / dotSpacing);
-            const dx = (endX - startX) / numDots;
-            const dy = (endY - startY) / numDots;
-            for (let i = 0; i <= numDots; i++) {
-                page.drawCircle({
-                    x: startX + i * dx,
-                    y: startY + i * dy,
-                    radius: thickness / 2,
-                    color,
-                });
+    const hLine = (y, x1 = 35, x2 = 560.276, thickness = 0.5, dotted = false) => {
+        if (dotted) {
+            const gap = 5;
+            for (let x = x1; x < x2; x += gap * 2) {
+                page.drawLine({ start: { x, y }, end: { x: Math.min(x + gap, x2), y }, thickness, color: GREY_BORDER });
             }
         } else {
-            page.drawLine({
-                start: { x: startX, y: startY },
-                end: { x: endX, y: endY },
-                thickness,
-                color,
-            });
+            page.drawLine({ start: { x: x1, y }, end: { x: x2, y }, thickness, color: GREY_BORDER });
         }
     };
 
-    // Draw main frame border
-    page.drawRectangle({
-        x: 20,
-        y: 20,
-        width: 555.276,
-        height: 801.89,
-        borderColor: rgb(0.9, 0.9, 0.9),
-        borderWidth: 1,
-        color: rgb(1, 1, 1),
-    });
+    const rect = (x, y, w, h, { fill = WHITE, border = GREY_BORDER, bw = 0.5 } = {}) => {
+        page.drawRectangle({ x, y, width: w, height: h, color: fill, borderColor: border, borderWidth: bw });
+    };
 
-    // -------------------------------------------------------------
+    // ── Outer frame ───────────────────────────────────────────────
+    rect(20, 20, 555.276, 801.89, { fill: WHITE, border: GREY_BORDER, bw: 1 });
+
+    // ─────────────────────────────────────────────────────────────
     // SECTION 1: HEADER
-    // -------------------------------------------------------------
-    // ZIKRINT Logo & Tagline (Left side)
-    page.drawRectangle({ x: 35, y: 778, width: 10, height: 3, color: rgb(0.1, 0.1, 0.1) });
-    page.drawRectangle({ x: 35, y: 772, width: 14, height: 3, color: rgb(0.1, 0.1, 0.1) });
-    page.drawRectangle({ x: 35, y: 766, width: 8, height: 3, color: rgb(0.1, 0.1, 0.1) });
-    
-    drawText("ZIKRINT", 55, 768, 22, helveticaBold);
-    drawText("Your Print, Our Responsibility", 55, 755, 8, helvetica, rgb(0.4, 0.4, 0.4));
+    // ─────────────────────────────────────────────────────────────
+    // Hamburger logo bars (black)
+    rect(35, 778, 10, 3, { fill: BLACK, border: BLACK, bw: 0 });
+    rect(35, 772, 14, 3, { fill: BLACK, border: BLACK, bw: 0 });
+    rect(35, 766,  8, 3, { fill: BLACK, border: BLACK, bw: 0 });
 
-    // Promo banner (Right side)
-    page.drawRectangle({
-        x: 400,
-        y: 745,
-        width: 160,
-        height: 48,
-        borderColor: rgb(0.8, 0.8, 0.8),
-        borderWidth: 1,
-        color: rgb(1, 1, 1),
-    });
-    drawText("Print Smarter. Save Time.", 410, 778, 8, helveticaBold, rgb(0.1, 0.1, 0.1));
-    drawText("Upload - Pay - Print - Pickup", 410, 765, 7.5, helvetica, rgb(0.3, 0.3, 0.3));
-    drawText("All in One App!", 410, 753, 8.5, helveticaBold, rgb(0.1, 0.1, 0.1));
+    text('ZIKRINT', 55, 768, 22, helveticaBold, BLACK);
+    text('Your Print, Our Responsibility', 55, 755, 8, helvetica, GREY_TEXT);
 
-    // Section line divider
-    drawLine(35, 735, 560.276, 735, 1, rgb(0.85, 0.85, 0.85));
+    // Promo box (white fill, grey border)
+    rect(390, 745, 170, 48, { fill: WHITE, border: GREY_BORDER, bw: 0.8 });
+    text('Print Smarter. Save Time.',    400, 778, 8,   helveticaBold, BLACK);
+    text('Upload - Pay - Print - Pickup',400, 765, 7.5, helvetica,     GREY_TEXT);
+    text('All in One App!',              400, 753, 8.5, helveticaBold, BLACK);
 
-    // -------------------------------------------------------------
-    // SECTION 2: PICKUP CODE & UNIQUE CODE
-    // -------------------------------------------------------------
-    // Layout: Two boxes side by side — Pickup Code (left) | Unique Code (right)
-    const hasUniqueCode = !!orderData.customId;
+    hLine(735);
 
-    if (hasUniqueCode) {
-        // LEFT: Pickup Code box
-        const boxW = 240;
-        const boxH = 70;
-        const leftBoxX = (595.276 / 2) - boxW - 10;
-        const leftBoxY = 645;
+    // ─────────────────────────────────────────────────────────────
+    // SECTION 2: PICKUP CODE  +  UNIQUE CODE
+    // ─────────────────────────────────────────────────────────────
+    centeredText('PICKUP CODE', 720, 9, helveticaBold, GREY_TEXT);
+    centeredText(`#${orderData.orderCode}`, 682, 32, helveticaBold, BLACK);
 
-        page.drawRectangle({
-            x: leftBoxX,
-            y: leftBoxY,
-            width: boxW,
-            height: boxH,
-            borderColor: rgb(0.8, 0.8, 0.8),
-            borderWidth: 1.5,
-            color: rgb(1, 1, 1),
-        });
-        drawText("PICKUP CODE", leftBoxX + 12, leftBoxY + 55, 8, helveticaBold, rgb(0.5, 0.5, 0.5));
-        drawText(`#${orderData.orderCode}`, leftBoxX + 12, leftBoxY + 30, 26, helveticaBold, rgb(0.1, 0.1, 0.1));
-        drawText("Show this number at the shop", leftBoxX + 12, leftBoxY + 12, 7, helvetica, rgb(0.5, 0.5, 0.5));
+    if (orderData.customId) {
+        const ucBoxW = 320;
+        const ucBoxX = (595.276 - ucBoxW) / 2;
+        const ucBoxY = 650;
+        const ucBoxH = 26;
 
-        // RIGHT: Unique Code box
-        const rightBoxX = (595.276 / 2) + 10;
+        // Box: white fill, solid black border so it's always visible
+        rect(ucBoxX, ucBoxY, ucBoxW, ucBoxH, { fill: WHITE, border: BLACK, bw: 1 });
 
-        page.drawRectangle({
-            x: rightBoxX,
-            y: leftBoxY,
-            width: boxW,
-            height: boxH,
-            borderColor: rgb(0.2, 0.2, 0.2),
-            borderWidth: 1.5,
-            color: rgb(0.97, 0.97, 0.97),
-        });
-        drawText("UNIQUE CODE (APP)", rightBoxX + 12, leftBoxY + 55, 8, helveticaBold, rgb(0.3, 0.3, 0.3));
-        drawText((orderData.customId).toUpperCase(), rightBoxX + 12, leftBoxY + 30, 16, helveticaBold, rgb(0.1, 0.1, 0.1));
-        drawText("Code shown in the user app after QR scan", rightBoxX + 12, leftBoxY + 12, 7, helvetica, rgb(0.5, 0.5, 0.5));
+        const label    = 'UNIQUE CODE:';
+        const labelW   = helveticaBold.widthOfTextAtSize(label, 8.5);
+        const val      = orderData.customId.toUpperCase();
+        const valW     = helveticaBold.widthOfTextAtSize(val, 10);
+        const startX   = ucBoxX + (ucBoxW - labelW - 6 - valW) / 2;
 
-    } else {
-        // Single centered Pickup Code (no unique code)
-        drawCenteredText("PICKUP CODE", 715, 11, helveticaBold, rgb(0.5, 0.5, 0.5));
-        drawCenteredText(`#${orderData.orderCode}`, 670, 36, helveticaBold, rgb(0.1, 0.1, 0.1));
+        page.drawText(label, { x: startX,             y: ucBoxY + 9, size: 8.5, font: helveticaBold, color: GREY_TEXT });
+        page.drawText(val,   { x: startX + labelW + 6, y: ucBoxY + 9, size: 10,  font: helveticaBold, color: BLACK });
     }
 
-    // SHOW THIS CODE container — sits below the code boxes (which end at Y=645)
-    const badgeText = "SHOW THIS CODE AT THE SHOP TO PICK UP YOUR PRINT";
-    const badgeWidth = helveticaBold.widthOfTextAtSize(badgeText, 8.5);
-    const badgeX = (595.276 - (badgeWidth + 24)) / 2;
-    page.drawRectangle({
-        x: badgeX,
-        y: 628,
-        width: badgeWidth + 24,
-        height: 20,
-        borderColor: rgb(0.85, 0.85, 0.85),
-        borderWidth: 1,
-        color: rgb(0.97, 0.97, 0.97),
-    });
-    drawText(badgeText, badgeX + 12, 634, 8.5, helveticaBold, rgb(0.2, 0.2, 0.2));
+    // "SHOW THIS CODE" badge
+    const badgeY  = orderData.customId ? 630 : 656;
+    const badgeW  = 480;
+    const badgeX  = (595.276 - badgeW) / 2;
+    rect(badgeX, badgeY, badgeW, 18, { fill: WHITE, border: GREY_BORDER, bw: 0.5 });
+    centeredText('SHOW THIS CODE AT THE SHOP TO PICK UP YOUR PRINT', badgeY + 5, 7.5, helveticaBold, BLACK);
 
-    drawLine(35, 612, 560.276, 612, 1, rgb(0.85, 0.85, 0.85), true); // dotted line
+    hLine(badgeY - 10, 35, 560.276, 0.5, true);
 
-    // -------------------------------------------------------------
+    // ─────────────────────────────────────────────────────────────
     // SECTION 3: CUSTOMER DETAILS
-    // -------------------------------------------------------------
-    drawCenteredText("CUSTOMER DETAILS", 575, 10, helveticaBold, rgb(0.4, 0.4, 0.4));
-    drawCenteredText("Customer Name", 560, 8.5, helvetica, rgb(0.5, 0.5, 0.5));
-    drawCenteredText(orderData.customerName || "Guest User", 542, 14, helveticaBold, rgb(0.1, 0.1, 0.1));
+    // ─────────────────────────────────────────────────────────────
+    centeredText('CUSTOMER DETAILS', 575, 10, helveticaBold, GREY_TEXT);
+    centeredText('Customer Name',    560, 8.5, helvetica,     GREY_TEXT);
+    centeredText(orderData.customerName || 'Guest User', 542, 14, helveticaBold, BLACK);
 
-    drawLine(35, 525, 560.276, 525, 1, rgb(0.85, 0.85, 0.85), true); // dotted line
+    hLine(525, 35, 560.276, 0.5, true);
 
-    // -------------------------------------------------------------
+    // ─────────────────────────────────────────────────────────────
     // SECTION 4: ORDER SUMMARY TABLE
-    // -------------------------------------------------------------
-    drawText("ORDER SUMMARY", 35, 508, 10, helveticaBold, rgb(0.4, 0.4, 0.4));
+    // ─────────────────────────────────────────────────────────────
+    text('ORDER SUMMARY', 35, 508, 10, helveticaBold, BLACK);
 
-    // Table coordinates
-    const tableTop = 495;
-    const tableLeft = 35;
+    const tableLeft  = 35;
     const tableWidth = 525.276;
-    const colWidths = [25, 230, 60, 70, 70, 70]; // total = 525
-    const headers = ["#", "FILE NAME", "COPIES", "PAGES/COPY", "TOTAL PAGES", "PRICE"];
-    
-    // Draw table header background
-    page.drawRectangle({
-        x: tableLeft,
-        y: tableTop - 18,
-        width: tableWidth,
-        height: 18,
-        color: rgb(0.95, 0.95, 0.95),
-        borderColor: rgb(0.85, 0.85, 0.85),
-        borderWidth: 1,
+    const tableTop   = 495;
+    const colWidths  = [25, 230, 60, 70, 70, 70];
+    const headers    = ['#', 'FILE NAME', 'COPIES', 'PAGES/COPY', 'TOTAL PAGES', 'PRICE'];
+
+    // Header row — white fill, black border
+    rect(tableLeft, tableTop - 18, tableWidth, 18, { fill: WHITE, border: BLACK, bw: 0.8 });
+
+    let curX = tableLeft;
+    headers.forEach((h, i) => {
+        const w = helveticaBold.widthOfTextAtSize(h, 8);
+        const x = i >= 2 ? curX + colWidths[i] - w - 8 : curX + 6;
+        page.drawText(h, { x, y: tableTop - 13, size: 8, font: helveticaBold, color: BLACK });
+        curX += colWidths[i];
     });
 
-    let currentX = tableLeft;
-    headers.forEach((header, idx) => {
-        const alignRight = idx >= 2;
-        const font = helveticaBold;
-        const size = 8;
-        const textWidth = font.widthOfTextAtSize(header, size);
-        let xPos = currentX + 6;
-        if (alignRight) {
-            xPos = currentX + colWidths[idx] - textWidth - 8;
-        }
-        page.drawText(header, { x: xPos, y: tableTop - 13, size, font, color: rgb(0.2, 0.2, 0.2) });
-        currentX += colWidths[idx];
-    });
+    // Data rows
+    let curY = tableTop - 18;
+    const rowH = 20;
 
-    // Draw data rows
-    let currentY = tableTop - 18;
-    const rowHeight = 20;
+    orderData.files.forEach((file, idx) => {
+        rect(tableLeft, curY - rowH, tableWidth, rowH, { fill: WHITE, border: GREY_BORDER, bw: 0.5 });
 
-    orderData.files.forEach((file, index) => {
-        page.drawRectangle({
-            x: tableLeft,
-            y: currentY - rowHeight,
-            width: tableWidth,
-            height: rowHeight,
-            borderColor: rgb(0.88, 0.88, 0.88),
-            borderWidth: 1,
-            color: rgb(1, 1, 1),
-        });
-
-        const rowValues = [
-            (index + 1).toString(),
-            file.fileName.length > 38 ? file.fileName.substring(0, 35) + "..." : file.fileName,
+        const vals = [
+            (idx + 1).toString(),
+            file.fileName.length > 38 ? file.fileName.substring(0, 35) + '...' : file.fileName,
             file.copies.toString(),
             file.pageCount.toString(),
             (file.pageCount * file.copies).toString(),
-            `Rs. ${(file.price || 0.0).toFixed(2)}`
+            `Rs. ${(file.price || 0).toFixed(2)}`
         ];
 
         let colX = tableLeft;
-        rowValues.forEach((val, idx) => {
-            const alignRight = idx >= 2;
-            const font = helvetica;
-            const size = 8.5;
-            const textWidth = font.widthOfTextAtSize(val, size);
-            let xPos = colX + 6;
-            if (alignRight) {
-                xPos = colX + colWidths[idx] - textWidth - 8;
-            }
-            page.drawText(val, { x: xPos, y: currentY - 14, size, font, color: rgb(0.15, 0.15, 0.15) });
-            colX += colWidths[idx];
+        vals.forEach((v, i) => {
+            const w = helvetica.widthOfTextAtSize(v, 8.5);
+            const x = i >= 2 ? colX + colWidths[i] - w - 8 : colX + 6;
+            page.drawText(v, { x, y: curY - 14, size: 8.5, font: helvetica, color: BLACK });
+            colX += colWidths[i];
         });
-
-        currentY -= rowHeight;
+        curY -= rowH;
     });
 
-    // Table Footer (Total Printable Pages)
-    page.drawRectangle({
-        x: tableLeft,
-        y: currentY - rowHeight,
-        width: tableWidth,
-        height: rowHeight,
-        color: rgb(0.97, 0.97, 0.97),
-        borderColor: rgb(0.85, 0.85, 0.85),
-        borderWidth: 1,
-    });
+    // Table footer row
+    const totalPages   = orderData.files.reduce((s, f) => s + f.pageCount * f.copies, 0);
+    const subtotal     = orderData.files.reduce((s, f) => s + (f.price || 0), 0);
 
-    const totalPrintablePages = orderData.files.reduce((sum, f) => sum + (f.pageCount * f.copies), 0);
-    const subtotalCost = orderData.files.reduce((sum, f) => sum + (f.price || 0.0), 0.0);
+    rect(tableLeft, curY - rowH, tableWidth, rowH, { fill: WHITE, border: BLACK, bw: 0.8 });
+    text('TOTAL PRINTABLE PAGES (Sum of Pages x Copies)', tableLeft + 140, curY - 14, 7.5, helveticaBold, BLACK);
 
-    drawText("TOTAL PRINTABLE PAGES (Sum of Pages x Copies)", tableLeft + 150, currentY - 14, 8, helveticaBold, rgb(0.2, 0.2, 0.2));
-    
-    const pagesValText = totalPrintablePages.toString();
-    const pagesValWidth = helveticaBold.widthOfTextAtSize(pagesValText, 8.5);
-    const pagesColX = tableLeft + colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3];
-    page.drawText(pagesValText, {
-        x: pagesColX + colWidths[4] - pagesValWidth - 8,
-        y: currentY - 14,
-        size: 8.5,
-        font: helveticaBold,
-        color: rgb(0.1, 0.1, 0.1)
-    });
+    const pColX = tableLeft + colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3];
+    const pgW = helveticaBold.widthOfTextAtSize(totalPages.toString(), 8.5);
+    page.drawText(totalPages.toString(), { x: pColX + colWidths[4] - pgW - 8, y: curY - 14, size: 8.5, font: helveticaBold, color: BLACK });
 
-    const priceValText = `Rs. ${subtotalCost.toFixed(2)}`;
-    const priceValWidth = helveticaBold.widthOfTextAtSize(priceValText, 8.5);
-    const priceColX = pagesColX + colWidths[4];
-    page.drawText(priceValText, {
-        x: priceColX + colWidths[5] - priceValWidth - 8,
-        y: currentY - 14,
-        size: 8.5,
-        font: helveticaBold,
-        color: rgb(0.1, 0.1, 0.1)
-    });
+    const priceStr = `Rs. ${subtotal.toFixed(2)}`;
+    const priceW   = helveticaBold.widthOfTextAtSize(priceStr, 8.5);
+    page.drawText(priceStr, { x: pColX + colWidths[4] + colWidths[5] - priceW - 8, y: curY - 14, size: 8.5, font: helveticaBold, color: BLACK });
 
-    currentY -= rowHeight;
+    curY -= rowH;
 
-    // -------------------------------------------------------------
-    // SECTION 5 & 6: ORDER INFO & PRICE BREAKDOWN (Side-by-side)
-    // -------------------------------------------------------------
-    const cardY = currentY - 100;
-    const cardHeight = 90;
-    const cardWidth = 250;
+    // ─────────────────────────────────────────────────────────────
+    // SECTION 5 & 6: ORDER INFO  |  PRICE BREAKDOWN (side-by-side)
+    // ─────────────────────────────────────────────────────────────
+    const cardY  = curY - 100;
+    const cardH  = 90;
+    const cardW  = 250;
 
-    // Card 1: ORDER INFORMATION
-    page.drawRectangle({
-        x: tableLeft,
-        y: cardY,
-        width: cardWidth,
-        height: cardHeight,
-        borderColor: rgb(0.85, 0.85, 0.85),
-        borderWidth: 1,
-        color: rgb(1, 1, 1),
-    });
-    drawText("ORDER INFORMATION", tableLeft + 12, cardY + 74, 9, helveticaBold, rgb(0.3, 0.3, 0.3));
-    
-    drawText("Total Files", tableLeft + 12, cardY + 54, 8, helvetica, rgb(0.4, 0.4, 0.4));
-    drawText(orderData.files.length.toString(), tableLeft + 220, cardY + 54, 8, helveticaBold);
+    // Card 1 — ORDER INFORMATION
+    rect(tableLeft, cardY, cardW, cardH, { fill: WHITE, border: GREY_BORDER, bw: 0.8 });
+    text('ORDER INFORMATION', tableLeft + 12, cardY + 74, 9, helveticaBold, BLACK);
 
-    drawText("Total Copies", tableLeft + 12, cardY + 36, 8, helvetica, rgb(0.4, 0.4, 0.4));
-    const totalCopiesCount = orderData.files.reduce((sum, f) => sum + f.copies, 0);
-    drawText(totalCopiesCount.toString(), tableLeft + 220, cardY + 36, 8, helveticaBold);
+    text('Total Files',            tableLeft + 12, cardY + 54, 8, helvetica,     GREY_TEXT);
+    text(orderData.files.length.toString(), tableLeft + 220, cardY + 54, 8, helveticaBold, BLACK);
 
-    drawText("Total Printable Pages", tableLeft + 12, cardY + 18, 8, helvetica, rgb(0.4, 0.4, 0.4));
-    drawText(totalPrintablePages.toString(), tableLeft + 220, cardY + 18, 8, helveticaBold);
+    const totalCopies = orderData.files.reduce((s, f) => s + f.copies, 0);
+    text('Total Copies',           tableLeft + 12, cardY + 36, 8, helvetica,     GREY_TEXT);
+    text(totalCopies.toString(),   tableLeft + 220, cardY + 36, 8, helveticaBold, BLACK);
 
-    // Card 2: PRICE BREAKDOWN
-    const card2X = tableLeft + 275.276;
-    page.drawRectangle({
-        x: card2X,
-        y: cardY,
-        width: cardWidth,
-        height: cardHeight,
-        borderColor: rgb(0.85, 0.85, 0.85),
-        borderWidth: 1,
-        color: rgb(1, 1, 1),
-    });
-    drawText("PRICE BREAKDOWN", card2X + 12, cardY + 74, 9, helveticaBold, rgb(0.3, 0.3, 0.3));
+    text('Total Printable Pages',  tableLeft + 12, cardY + 18, 8, helvetica,     GREY_TEXT);
+    text(totalPages.toString(),    tableLeft + 220, cardY + 18, 8, helveticaBold, BLACK);
 
-    drawText("Subtotal (Printing Charges)", card2X + 12, cardY + 56, 8, helvetica, rgb(0.4, 0.4, 0.4));
-    const subtotalText = `Rs. ${subtotalCost.toFixed(2)}`;
-    const subtotalWidth = helveticaBold.widthOfTextAtSize(subtotalText, 8);
-    page.drawText(subtotalText, { x: card2X + cardWidth - subtotalWidth - 12, y: cardY + 56, size: 8, font: helveticaBold });
+    // Card 2 — PRICE BREAKDOWN
+    const c2X = tableLeft + 275.276;
+    rect(c2X, cardY, cardW, cardH, { fill: WHITE, border: GREY_BORDER, bw: 0.8 });
+    text('PRICE BREAKDOWN', c2X + 12, cardY + 74, 9, helveticaBold, BLACK);
 
-    const roundedPlatformFee = Math.ceil(orderData.platformFee || 2.0);
-    drawText("Platform Fee", card2X + 12, cardY + 42, 8, helvetica, rgb(0.4, 0.4, 0.4));
-    const platformFeeText = `Rs. ${roundedPlatformFee.toFixed(2)}`;
-    const platformFeeWidth = helveticaBold.widthOfTextAtSize(platformFeeText, 8);
-    page.drawText(platformFeeText, { x: card2X + cardWidth - platformFeeWidth - 12, y: cardY + 42, size: 8, font: helveticaBold });
+    const roundedFee = Math.ceil(orderData.platformFee || 2.0);
+    const coverCharge = orderData.coverPageCharge || 2.0;
+    const grandTotal  = subtotal + roundedFee + coverCharge;
 
-    drawText("Cover Page Charge", card2X + 12, cardY + 28, 8, helvetica, rgb(0.4, 0.4, 0.4));
-    const coverChargeText = `Rs. ${(orderData.coverPageCharge || 2.0).toFixed(2)}`;
-    const coverChargeWidth = helveticaBold.widthOfTextAtSize(coverChargeText, 8);
-    page.drawText(coverChargeText, { x: card2X + cardWidth - coverChargeWidth - 12, y: cardY + 28, size: 8, font: helveticaBold });
+    const priceRow = (label, amount, y) => {
+        text(label, c2X + 12, y, 8, helvetica, GREY_TEXT);
+        const valStr = `Rs. ${amount.toFixed(2)}`;
+        const vw = helveticaBold.widthOfTextAtSize(valStr, 8);
+        page.drawText(valStr, { x: c2X + cardW - vw - 12, y, size: 8, font: helveticaBold, color: BLACK });
+    };
 
-    drawLine(card2X + 10, cardY + 21, card2X + cardWidth - 10, cardY + 21, 0.5, rgb(0.85, 0.85, 0.85));
+    priceRow('Subtotal (Printing Charges)', subtotal,    cardY + 56);
+    priceRow('Platform Fee',                roundedFee,  cardY + 42);
+    priceRow('Cover Page Charge',           coverCharge, cardY + 28);
 
-    drawText("GRAND TOTAL", card2X + 12, cardY + 7, 9.5, helveticaBold, rgb(0.1, 0.1, 0.1));
-    const grandTotalVal = subtotalCost + roundedPlatformFee + (orderData.coverPageCharge || 2.0);
-    const grandTotalText = `Rs. ${grandTotalVal.toFixed(2)}`;
-    const grandTotalWidth = helveticaBold.widthOfTextAtSize(grandTotalText, 10.5);
-    
-    page.drawRectangle({
-        x: card2X + cardWidth - grandTotalWidth - 22,
-        y: cardY + 3,
-        width: grandTotalWidth + 14,
-        height: 16,
-        color: rgb(0.15, 0.15, 0.15),
-        borderColor: rgb(0.15, 0.15, 0.15),
-        borderWidth: 1,
-    });
-    page.drawText(grandTotalText, {
-        x: card2X + cardWidth - grandTotalWidth - 15,
-        y: cardY + 7,
-        size: 9.5,
-        font: helveticaBold,
-        color: rgb(1, 1, 1)
-    });
+    hLine(cardY + 21, c2X + 10, c2X + cardW - 10, 0.5);
 
-    // -------------------------------------------------------------
+    // Grand Total box — black fill, white text
+    text('GRAND TOTAL', c2X + 12, cardY + 7, 9.5, helveticaBold, BLACK);
+    const gtStr = `Rs. ${grandTotal.toFixed(2)}`;
+    const gtW   = helveticaBold.widthOfTextAtSize(gtStr, 9.5);
+    rect(c2X + cardW - gtW - 22, cardY + 3, gtW + 14, 16, { fill: BLACK, border: BLACK, bw: 0 });
+    page.drawText(gtStr, { x: c2X + cardW - gtW - 15, y: cardY + 7, size: 9.5, font: helveticaBold, color: WHITE });
+
+    // ─────────────────────────────────────────────────────────────
     // SECTION 7: IMPORTANT NOTE
-    // -------------------------------------------------------------
+    // ─────────────────────────────────────────────────────────────
     const noteY = cardY - 45;
-    page.drawRectangle({
-        x: tableLeft,
-        y: noteY,
-        width: tableWidth,
-        height: 32,
-        color: rgb(0.97, 0.97, 0.97),
-        borderColor: rgb(0.88, 0.88, 0.88),
-        borderWidth: 1,
-    });
-    
-    drawText("IMPORTANT NOTE:", tableLeft + 12, noteY + 20, 8.5, helveticaBold, rgb(0.2, 0.2, 0.2));
-    drawText("A cover page with this order details will be printed first. Thank you for choosing our service!", tableLeft + 12, noteY + 8, 8, helvetica, rgb(0.4, 0.4, 0.4));
+    rect(tableLeft, noteY, tableWidth, 32, { fill: WHITE, border: GREY_BORDER, bw: 0.5 });
+    text('IMPORTANT NOTE:', tableLeft + 12, noteY + 20, 8.5, helveticaBold, BLACK);
+    text('A cover page with this order details will be printed first. Thank you for choosing our service!', tableLeft + 12, noteY + 8, 7.5, helvetica, GREY_TEXT);
 
-    // -------------------------------------------------------------
-    // SECTION 8: FOOTER BRANDING
-    // -------------------------------------------------------------
+    // ─────────────────────────────────────────────────────────────
+    // SECTION 8: FOOTER
+    // ─────────────────────────────────────────────────────────────
     const footerY = 42;
-    page.drawRectangle({ x: tableLeft, y: footerY + 12, width: 8, height: 2, color: rgb(0.1, 0.1, 0.1) });
-    page.drawRectangle({ x: tableLeft, y: footerY + 8, width: 11, height: 2, color: rgb(0.1, 0.1, 0.1) });
-    page.drawRectangle({ x: tableLeft, y: footerY + 4, width: 6, height: 2, color: rgb(0.1, 0.1, 0.1) });
-    
-    drawText("ZIKRINT", tableLeft + 15, footerY + 5, 14, helveticaBold);
-    drawText("Smart Printing. Simplified!", tableLeft, footerY - 6, 8, helvetica, rgb(0.4, 0.4, 0.4));
+    rect(tableLeft,      footerY + 12, 10, 2, { fill: BLACK, border: BLACK, bw: 0 });
+    rect(tableLeft,      footerY + 8,  14, 2, { fill: BLACK, border: BLACK, bw: 0 });
+    rect(tableLeft,      footerY + 4,  8,  2, { fill: BLACK, border: BLACK, bw: 0 });
 
-    // Workflow representation (Right side)
-    const workflowX = tableLeft + 180;
-    const workflowSpacing = 55;
+    text('ZIKRINT',               tableLeft + 18, footerY + 5,  14, helveticaBold, BLACK);
+    text('Smart Printing. Simplified!', tableLeft, footerY - 6, 7.5, helvetica, GREY_TEXT);
+
     const steps = [
-        { label: "Upload", sub: "your files", icon: "STEP 1" },
-        { label: "Secure", sub: "Payments", icon: "STEP 2" },
-        { label: "Print", sub: "Quality", icon: "STEP 3" },
-        { label: "Easy", sub: "Pickup", icon: "STEP 4" }
+        { step: 'STEP 1', label: 'Upload',  sub: 'your files'  },
+        { step: 'STEP 2', label: 'Secure',  sub: 'Payments'    },
+        { step: 'STEP 3', label: 'Print',   sub: 'Quality'     },
+        { step: 'STEP 4', label: 'Easy',    sub: 'Pickup'      },
     ];
-
-    steps.forEach((step, idx) => {
-        const xPos = workflowX + idx * workflowSpacing;
-        drawText(step.icon, xPos - 5, footerY + 10, 7, helveticaBold, rgb(0.4, 0.4, 0.4));
-        drawText(step.label, xPos - 5, footerY - 2, 7.5, helveticaBold, rgb(0.2, 0.2, 0.2));
-        drawText(step.sub, xPos - 5, footerY - 10, 6.5, helvetica, rgb(0.4, 0.4, 0.4));
-        if (idx < steps.length - 1) {
-            drawText("->", xPos + 32, footerY + 3, 9, helveticaBold, rgb(0.6, 0.6, 0.6));
-        }
+    const wfX = tableLeft + 185;
+    steps.forEach((s, i) => {
+        const x = wfX + i * 55;
+        text(s.step,  x, footerY + 10, 6.5, helveticaBold, GREY_TEXT);
+        text(s.label, x, footerY - 2,  7.5, helveticaBold, BLACK);
+        text(s.sub,   x, footerY - 11, 6.5, helvetica,     GREY_TEXT);
+        if (i < steps.length - 1) text('->', x + 33, footerY + 3, 8, helveticaBold, GREY_TEXT);
     });
 
-    // Dark banner at the very bottom
-    page.drawRectangle({
-        x: 20,
-        y: 20,
-        width: 555.276,
-        height: 16,
-        color: rgb(0.1, 0.1, 0.1),
-    });
-    drawCenteredText("THANK YOU FOR CHOOSING ZIKRINT - YOUR TRUST, OUR MOTIVATION!", 24, 7, helveticaBold, rgb(1, 1, 1));
+    // Bottom bar — black fill with white text
+    rect(20, 20, 555.276, 16, { fill: BLACK, border: BLACK, bw: 0 });
+    centeredText('THANK YOU FOR CHOOSING ZIKRINT - YOUR TRUST, OUR MOTIVATION!', 24, 7, helveticaBold, WHITE);
 
     const pdfBytes = await pdfDoc.save();
     return Buffer.from(pdfBytes);
