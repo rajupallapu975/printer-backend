@@ -85,44 +85,86 @@ async function generateCoverPage(orderData) {
     drawLine(35, 735, 560.276, 735, 1, rgb(0.85, 0.85, 0.85));
 
     // -------------------------------------------------------------
-    // SECTION 2: PICKUP CODE
+    // SECTION 2: PICKUP CODE & UNIQUE CODE
     // -------------------------------------------------------------
-    drawCenteredText("PICKUP CODE", 715, 11, helveticaBold, rgb(0.5, 0.5, 0.5));
-    drawCenteredText(`#${orderData.orderCode}`, 670, 36, helveticaBold, rgb(0.1, 0.1, 0.1));
+    // Layout: Two boxes side by side — Pickup Code (left) | Unique Code (right)
+    const hasUniqueCode = !!orderData.customId;
 
-    // SHOW THIS CODE container
+    if (hasUniqueCode) {
+        // LEFT: Pickup Code box
+        const boxW = 240;
+        const boxH = 70;
+        const leftBoxX = (595.276 / 2) - boxW - 10;
+        const leftBoxY = 645;
+
+        page.drawRectangle({
+            x: leftBoxX,
+            y: leftBoxY,
+            width: boxW,
+            height: boxH,
+            borderColor: rgb(0.8, 0.8, 0.8),
+            borderWidth: 1.5,
+            color: rgb(1, 1, 1),
+        });
+        drawText("PICKUP CODE", leftBoxX + 12, leftBoxY + 55, 8, helveticaBold, rgb(0.5, 0.5, 0.5));
+        drawText(`#${orderData.orderCode}`, leftBoxX + 12, leftBoxY + 30, 26, helveticaBold, rgb(0.1, 0.1, 0.1));
+        drawText("Show this number at the shop", leftBoxX + 12, leftBoxY + 12, 7, helvetica, rgb(0.5, 0.5, 0.5));
+
+        // RIGHT: Unique Code box
+        const rightBoxX = (595.276 / 2) + 10;
+
+        page.drawRectangle({
+            x: rightBoxX,
+            y: leftBoxY,
+            width: boxW,
+            height: boxH,
+            borderColor: rgb(0.2, 0.2, 0.2),
+            borderWidth: 1.5,
+            color: rgb(0.97, 0.97, 0.97),
+        });
+        drawText("UNIQUE CODE (APP)", rightBoxX + 12, leftBoxY + 55, 8, helveticaBold, rgb(0.3, 0.3, 0.3));
+        drawText((orderData.customId).toUpperCase(), rightBoxX + 12, leftBoxY + 30, 16, helveticaBold, rgb(0.1, 0.1, 0.1));
+        drawText("Code shown in the user app after QR scan", rightBoxX + 12, leftBoxY + 12, 7, helvetica, rgb(0.5, 0.5, 0.5));
+
+    } else {
+        // Single centered Pickup Code (no unique code)
+        drawCenteredText("PICKUP CODE", 715, 11, helveticaBold, rgb(0.5, 0.5, 0.5));
+        drawCenteredText(`#${orderData.orderCode}`, 670, 36, helveticaBold, rgb(0.1, 0.1, 0.1));
+    }
+
+    // SHOW THIS CODE container — sits below the code boxes (which end at Y=645)
     const badgeText = "SHOW THIS CODE AT THE SHOP TO PICK UP YOUR PRINT";
     const badgeWidth = helveticaBold.widthOfTextAtSize(badgeText, 8.5);
     const badgeX = (595.276 - (badgeWidth + 24)) / 2;
     page.drawRectangle({
         x: badgeX,
-        y: 640,
+        y: 628,
         width: badgeWidth + 24,
         height: 20,
         borderColor: rgb(0.85, 0.85, 0.85),
         borderWidth: 1,
         color: rgb(0.97, 0.97, 0.97),
     });
-    drawText(badgeText, badgeX + 12, 646, 8.5, helveticaBold, rgb(0.2, 0.2, 0.2));
+    drawText(badgeText, badgeX + 12, 634, 8.5, helveticaBold, rgb(0.2, 0.2, 0.2));
 
-    drawLine(35, 625, 560.276, 625, 1, rgb(0.85, 0.85, 0.85), true); // dotted line
+    drawLine(35, 612, 560.276, 612, 1, rgb(0.85, 0.85, 0.85), true); // dotted line
 
     // -------------------------------------------------------------
     // SECTION 3: CUSTOMER DETAILS
     // -------------------------------------------------------------
-    drawCenteredText("CUSTOMER DETAILS", 605, 10, helveticaBold, rgb(0.4, 0.4, 0.4));
-    drawCenteredText("Customer Name", 590, 8.5, helvetica, rgb(0.5, 0.5, 0.5));
-    drawCenteredText(orderData.customerName || "Guest User", 572, 14, helveticaBold, rgb(0.1, 0.1, 0.1));
+    drawCenteredText("CUSTOMER DETAILS", 575, 10, helveticaBold, rgb(0.4, 0.4, 0.4));
+    drawCenteredText("Customer Name", 560, 8.5, helvetica, rgb(0.5, 0.5, 0.5));
+    drawCenteredText(orderData.customerName || "Guest User", 542, 14, helveticaBold, rgb(0.1, 0.1, 0.1));
 
-    drawLine(35, 555, 560.276, 555, 1, rgb(0.85, 0.85, 0.85), true); // dotted line
+    drawLine(35, 525, 560.276, 525, 1, rgb(0.85, 0.85, 0.85), true); // dotted line
 
     // -------------------------------------------------------------
     // SECTION 4: ORDER SUMMARY TABLE
     // -------------------------------------------------------------
-    drawText("ORDER SUMMARY", 35, 538, 10, helveticaBold, rgb(0.4, 0.4, 0.4));
+    drawText("ORDER SUMMARY", 35, 508, 10, helveticaBold, rgb(0.4, 0.4, 0.4));
 
     // Table coordinates
-    const tableTop = 525;
+    const tableTop = 495;
     const tableLeft = 35;
     const tableWidth = 525.276;
     const colWidths = [25, 230, 60, 70, 70, 70]; // total = 525
@@ -238,7 +280,7 @@ async function generateCoverPage(orderData) {
     // SECTION 5 & 6: ORDER INFO & PRICE BREAKDOWN (Side-by-side)
     // -------------------------------------------------------------
     const cardY = currentY - 100;
-    const cardHeight = 85;
+    const cardHeight = 90;
     const cardWidth = 250;
 
     // Card 1: ORDER INFORMATION
@@ -251,17 +293,17 @@ async function generateCoverPage(orderData) {
         borderWidth: 1,
         color: rgb(1, 1, 1),
     });
-    drawText("ORDER INFORMATION", tableLeft + 12, cardY + 70, 9, helveticaBold, rgb(0.3, 0.3, 0.3));
+    drawText("ORDER INFORMATION", tableLeft + 12, cardY + 74, 9, helveticaBold, rgb(0.3, 0.3, 0.3));
     
-    drawText("Total Files", tableLeft + 12, cardY + 50, 8.5, helvetica, rgb(0.4, 0.4, 0.4));
-    drawText(orderData.files.length.toString(), tableLeft + 220, cardY + 50, 8.5, helveticaBold);
+    drawText("Total Files", tableLeft + 12, cardY + 54, 8, helvetica, rgb(0.4, 0.4, 0.4));
+    drawText(orderData.files.length.toString(), tableLeft + 220, cardY + 54, 8, helveticaBold);
 
-    drawText("Total Copies", tableLeft + 12, cardY + 32, 8.5, helvetica, rgb(0.4, 0.4, 0.4));
+    drawText("Total Copies", tableLeft + 12, cardY + 36, 8, helvetica, rgb(0.4, 0.4, 0.4));
     const totalCopiesCount = orderData.files.reduce((sum, f) => sum + f.copies, 0);
-    drawText(totalCopiesCount.toString(), tableLeft + 220, cardY + 32, 8.5, helveticaBold);
+    drawText(totalCopiesCount.toString(), tableLeft + 220, cardY + 36, 8, helveticaBold);
 
-    drawText("Total Printable Pages", tableLeft + 12, cardY + 14, 8.5, helvetica, rgb(0.4, 0.4, 0.4));
-    drawText(totalPrintablePages.toString(), tableLeft + 220, cardY + 14, 8.5, helveticaBold);
+    drawText("Total Printable Pages", tableLeft + 12, cardY + 18, 8, helvetica, rgb(0.4, 0.4, 0.4));
+    drawText(totalPrintablePages.toString(), tableLeft + 220, cardY + 18, 8, helveticaBold);
 
     // Card 2: PRICE BREAKDOWN
     const card2X = tableLeft + 275.276;
@@ -274,28 +316,34 @@ async function generateCoverPage(orderData) {
         borderWidth: 1,
         color: rgb(1, 1, 1),
     });
-    drawText("PRICE BREAKDOWN", card2X + 12, cardY + 70, 9, helveticaBold, rgb(0.3, 0.3, 0.3));
+    drawText("PRICE BREAKDOWN", card2X + 12, cardY + 74, 9, helveticaBold, rgb(0.3, 0.3, 0.3));
 
-    drawText("Subtotal (Printing Charges)", card2X + 12, cardY + 50, 8.5, helvetica, rgb(0.4, 0.4, 0.4));
+    drawText("Subtotal (Printing Charges)", card2X + 12, cardY + 56, 8, helvetica, rgb(0.4, 0.4, 0.4));
     const subtotalText = `Rs. ${subtotalCost.toFixed(2)}`;
-    const subtotalWidth = helveticaBold.widthOfTextAtSize(subtotalText, 8.5);
-    page.drawText(subtotalText, { x: card2X + cardWidth - subtotalWidth - 12, y: cardY + 50, size: 8.5, font: helveticaBold });
+    const subtotalWidth = helveticaBold.widthOfTextAtSize(subtotalText, 8);
+    page.drawText(subtotalText, { x: card2X + cardWidth - subtotalWidth - 12, y: cardY + 56, size: 8, font: helveticaBold });
 
-    drawText("Extra Page Charge (Cover Page)", card2X + 12, cardY + 32, 8.5, helvetica, rgb(0.4, 0.4, 0.4));
+    const roundedPlatformFee = Math.ceil(orderData.platformFee || 2.0);
+    drawText("Platform Fee", card2X + 12, cardY + 42, 8, helvetica, rgb(0.4, 0.4, 0.4));
+    const platformFeeText = `Rs. ${roundedPlatformFee.toFixed(2)}`;
+    const platformFeeWidth = helveticaBold.widthOfTextAtSize(platformFeeText, 8);
+    page.drawText(platformFeeText, { x: card2X + cardWidth - platformFeeWidth - 12, y: cardY + 42, size: 8, font: helveticaBold });
+
+    drawText("Cover Page Charge", card2X + 12, cardY + 28, 8, helvetica, rgb(0.4, 0.4, 0.4));
     const coverChargeText = `Rs. ${(orderData.coverPageCharge || 2.0).toFixed(2)}`;
-    const coverChargeWidth = helveticaBold.widthOfTextAtSize(coverChargeText, 8.5);
-    page.drawText(coverChargeText, { x: card2X + cardWidth - coverChargeWidth - 12, y: cardY + 32, size: 8.5, font: helveticaBold });
+    const coverChargeWidth = helveticaBold.widthOfTextAtSize(coverChargeText, 8);
+    page.drawText(coverChargeText, { x: card2X + cardWidth - coverChargeWidth - 12, y: cardY + 28, size: 8, font: helveticaBold });
 
-    drawLine(card2X + 10, cardY + 24, card2X + cardWidth - 10, cardY + 24, 0.5, rgb(0.85, 0.85, 0.85));
+    drawLine(card2X + 10, cardY + 21, card2X + cardWidth - 10, cardY + 21, 0.5, rgb(0.85, 0.85, 0.85));
 
-    drawText("GRAND TOTAL", card2X + 12, cardY + 8, 9.5, helveticaBold, rgb(0.1, 0.1, 0.1));
-    const grandTotalVal = subtotalCost + (orderData.coverPageCharge || 2.0);
+    drawText("GRAND TOTAL", card2X + 12, cardY + 7, 9.5, helveticaBold, rgb(0.1, 0.1, 0.1));
+    const grandTotalVal = subtotalCost + roundedPlatformFee + (orderData.coverPageCharge || 2.0);
     const grandTotalText = `Rs. ${grandTotalVal.toFixed(2)}`;
     const grandTotalWidth = helveticaBold.widthOfTextAtSize(grandTotalText, 10.5);
     
     page.drawRectangle({
         x: card2X + cardWidth - grandTotalWidth - 22,
-        y: cardY + 4,
+        y: cardY + 3,
         width: grandTotalWidth + 14,
         height: 16,
         color: rgb(0.15, 0.15, 0.15),
@@ -304,7 +352,7 @@ async function generateCoverPage(orderData) {
     });
     page.drawText(grandTotalText, {
         x: card2X + cardWidth - grandTotalWidth - 15,
-        y: cardY + 8,
+        y: cardY + 7,
         size: 9.5,
         font: helveticaBold,
         color: rgb(1, 1, 1)

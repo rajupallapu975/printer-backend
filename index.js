@@ -329,9 +329,11 @@ app.post("/complete-order", async (req, res, next) => {
 
         const coverPageBuffer = await generateCoverPage({
           orderCode,
+          customId: freshData.customId || null,
           customerName: freshData.userEmail || freshData.userId || 'Guest User',
           files: formattedFiles,
           coverPageCharge: 2.0,
+          platformFee: Number(freshData.platformCommission || freshData.printSettings?.commissionAmount || 2.0)
         });
 
         const folderName = 'xerox_processed_orders';
