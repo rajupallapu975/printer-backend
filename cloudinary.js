@@ -7,6 +7,8 @@ const configB = {
     api_secret: process.env.CLOUDINARY_API_SECRET_B
 };
 
+cloudinary.config(configB);
+
 function getSignedUrl(url, config, downloadName = null, explicitPublicId = null, explicitVersion = null) {
     if (!url || (!url.includes('api.cloudinary.com') && !url.includes('res.cloudinary.com'))) return url;
     if (url.includes('api.cloudinary.com')) return url; // Do not attempt to sign API links with CDN signatures
@@ -62,6 +64,13 @@ function getSignedUrl(url, config, downloadName = null, explicitPublicId = null,
         }
 
         if (!publicId) return url;
+
+        if (format === 'pdf') {
+            return cloudinary.utils.private_download_url(publicId, 'pdf', {
+                resource_type: isRaw ? 'raw' : 'image',
+                type: 'upload'
+            });
+        }
 
         const options = {
             sign_url: true,
