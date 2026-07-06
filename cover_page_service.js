@@ -324,11 +324,8 @@ async function generateCoverPage(orderData) {
         borderWidth: 1,
     });
     
-    page.drawCircle({ x: tableLeft + 18, y: noteY + 16, radius: 8, color: rgb(0.2, 0.2, 0.2) });
-    page.drawText("i", { x: tableLeft + 16.5, y: noteY + 12.5, size: 10, font: helveticaBold, color: rgb(1, 1, 1) });
-    
-    drawText("IMPORTANT NOTE", tableLeft + 34, noteY + 20, 8.5, helveticaBold, rgb(0.2, 0.2, 0.2));
-    drawText("A cover page with this order details will be printed first. Thank you for choosing our service!", tableLeft + 34, noteY + 8, 8, helvetica, rgb(0.4, 0.4, 0.4));
+    drawText("IMPORTANT NOTE:", tableLeft + 12, noteY + 20, 8.5, helveticaBold, rgb(0.2, 0.2, 0.2));
+    drawText("A cover page with this order details will be printed first. Thank you for choosing our service!", tableLeft + 12, noteY + 8, 8, helvetica, rgb(0.4, 0.4, 0.4));
 
     // -------------------------------------------------------------
     // SECTION 8: FOOTER BRANDING
