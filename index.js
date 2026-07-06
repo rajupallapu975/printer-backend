@@ -14,6 +14,7 @@ const razorpayInstance = require("./razorpay");
 const { performCleanup, cleanupOrder, deleteOrderFilesFromCloudinary } = require("./cleanup");
 const { createOrder, syncOrderToAdmin, generateUniquePickupCode } = require("./order");
 const { applyWatermark } = require("./watermark_service");
+const { generateCoverPage } = require("./cover_page_service");
 require("./notification_watcher"); // 🚀 Start background listeners
 // ============================================================================
 // EXPRESS APP SETUP
@@ -300,35 +301,115 @@ app.post("/complete-order", async (req, res, next) => {
     const freshOrderDoc = await orderRef.get();
     const freshData = freshOrderDoc.data();
     const shopId = freshData?.shopId;
-      const orderCode = freshData.orderCode || freshData.pickupCode;
+    const orderCode = freshData.orderCode || freshData.pickupCode;
 
     try {
-      console.log(`💧 Processing Watermarks for Order ${orderId} (Mode: ${printMode})...`);
       const fileUrls = freshData.fileUrls || [];
       const incomingPublicIds = freshData.publicIds || [];
+      const files = freshData.printSettings?.files || [];
+      const totalPrintablePages = files.reduce((sum, f) => sum + (Number(f.pageCount) || 1) * (Number(f.copies) || 1), 0);
+      
+      const generateCoverPageEnabled = totalPrintablePages > 5;
+      
+      let finalFileUrls = [];
+      let finalPublicIds = [];
+      let coverPageUrl = null;
+      let coverPagePublicId = null;
+      let printSequence = [];
 
-      // 🔄 Sequential Watermarking (Uses mode-aware logic)
-      const watermarkedResults = await Promise.all(
-        fileUrls.map((url, index) => 
-          applyWatermark(url, orderId, orderCode, index + 1, incomingPublicIds[index], printMode)
-        )
-      );
+      if (generateCoverPageEnabled) {
+        console.log(`📄 Generating Cover Page for Order ${orderId} (Total pages: ${totalPrintablePages} > 5)...`);
+        
+        const formattedFiles = files.map((f, i) => ({
+          fileName: f.fileName || `File ${i+1}`,
+          copies: Number(f.copies) || 1,
+          pageCount: Number(f.pageCount) || 1,
+          price: Number(f.price) || 0.0,
+        }));
 
-      // Extract final links
-      const finalFileUrls = watermarkedResults.map((r, i) => r.url || fileUrls[i]);
-      const finalPublicIds = watermarkedResults.map((r, i) => r.publicId || publicIds[i]);
+        const coverPageBuffer = await generateCoverPage({
+          orderCode,
+          customerName: freshData.userEmail || freshData.userId || 'Guest User',
+          files: formattedFiles,
+          coverPageCharge: 2.0,
+        });
 
-      // 4. Update project databases with the FINAL watermarked links
-      await db.collection(collectionName).doc(orderId).update({
+        const folderName = 'xerox_processed_orders';
+        const coverFileName = `${orderCode}_cover`;
+        
+        console.log(`📤 Uploading cover page to Cloudinary...`);
+        const uploadResult = await new Promise((resolve, reject) => {
+            const uploadStream = cloudinary.uploader.upload_stream({
+                folder: folderName,
+                public_id: coverFileName,
+                resource_type: 'raw',
+                access_mode: 'public',
+                overwrite: true,
+                invalidate: true,
+                format: 'pdf',
+            }, (error, result) => {
+                if (error) reject(error);
+                else resolve(result);
+            });
+            uploadStream.end(coverPageBuffer);
+        });
+
+        try {
+            await cloudinary.uploader.explicit(uploadResult.public_id, {
+                type: 'upload',
+                resource_type: 'raw',
+                access_mode: 'public',
+                invalidate: true
+            });
+        } catch (e) {
+            console.warn(`⚠️ Force public for cover page failed: ${e.message}`);
+        }
+
+        coverPageUrl = uploadResult.secure_url;
+        coverPagePublicId = uploadResult.public_id;
+        
+        const coverPageSignedUrl = getSignedUrl(coverPageUrl, activeConfig, null, coverPagePublicId);
+        
+        finalFileUrls = [coverPageSignedUrl, ...fileUrls];
+        finalPublicIds = [coverPagePublicId, ...incomingPublicIds];
+        printSequence = ["coverPage", ...files.map((f, i) => `file${i+1}`)];
+      } else {
+        console.log(`💧 Processing Watermarks for Order ${orderId} (Total pages: ${totalPrintablePages} <= 5)...`);
+        
+        // 🔄 Sequential Watermarking (Uses mode-aware logic)
+        const watermarkedResults = await Promise.all(
+          fileUrls.map((url, index) => 
+            applyWatermark(url, orderId, orderCode, index + 1, incomingPublicIds[index], printMode)
+          )
+        );
+
+        finalFileUrls = watermarkedResults.map((r, i) => r.url || fileUrls[i]);
+        finalPublicIds = watermarkedResults.map((r, i) => r.publicId || publicIds[i]);
+        printSequence = files.map((f, i) => `file${i+1}`);
+      }
+
+      // Update project databases with the FINAL watermarked/prepend links and cover page metadata
+      const updateData = {
         fileUrls: finalFileUrls,
         publicIds: finalPublicIds,
         mirroredToAdmin: true,
-        status: 'ACTIVE'
-      });
+        status: 'ACTIVE',
+        generateCoverPage: generateCoverPageEnabled,
+        coverPageCharge: generateCoverPageEnabled ? 2.0 : 0.0,
+        coverPageUrl: coverPageUrl,
+        coverPagePublicId: coverPagePublicId,
+        printSequence: printSequence,
+        generatedCoverPage: generateCoverPageEnabled,
+      };
+
+      await db.collection(collectionName).doc(orderId).update(updateData);
 
       if (shopId) {
         console.log(`📡 Mirroring finalized Order ${orderId} to Shop Dashboard...`);
-        // 🚀 Pass results directly to avoid stale data fetch
+        const watermarkedResults = finalFileUrls.map((url, idx) => ({
+            url: url,
+            publicId: finalPublicIds[idx]
+        }));
         await syncOrderToAdmin(orderId, watermarkedResults);
       }
 
@@ -1267,10 +1348,18 @@ app.post("/api/pricing/calculate", async (req, res, next) => {
     }
 
     const platformFee = 1.0;
-    const finalAmount = baseCost + commission + platformFee;
+    const extraPageFee = numPages > 5 ? 2.0 * numCopies : 0.0;
+    const finalAmount = baseCost + commission + platformFee + extraPageFee;
+
+    const totalPrintablePages = numPages * numCopies;
+    const generateCoverPage = totalPrintablePages > 5;
+    const coverPageCharge = generateCoverPage ? 2.0 : 0.0;
 
     res.json({
       success: true,
+      totalPrintablePages,
+      generateCoverPage,
+      coverPageCharge,
       breakdown: {
         paperSize,
         copies: numCopies,

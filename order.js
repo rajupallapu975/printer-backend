@@ -112,12 +112,17 @@ async function calculatePricingBreakdown(printSettings) {
   // Track the primary commission type/value used for metadata
   let primaryCommissionType = 'percentage';
   let primaryCommissionValue = 0.0;
+  let extraPageFee = 0.0;
 
   for (const file of printSettings.files) {
     const pages = file.pageCount || 1;
     const copies = file.copies || 1;
     const isColor = file.color === "COLOR";
     const isDoubleSided = !!(file.doubleSided || file.duplex);
+
+    if (pages > 5) {
+      extraPageFee += 2.0 * copies;
+    }
 
     let filePrintCost = 0;
     let fileCommission = 0;
@@ -175,7 +180,7 @@ async function calculatePricingBreakdown(printSettings) {
   return {
     printingCost,
     platformCommission,
-    totalAmount: printingCost + platformCommission,
+    totalAmount: printingCost + platformCommission + extraPageFee,
     shopPricingUsed: shopConfig || {},
     commissionType: primaryCommissionType,
     commissionValue: primaryCommissionValue,
@@ -393,6 +398,8 @@ async function syncOrderToAdmin(orderId, watermarkedResults = null) {
       numCopies: printSettings.files && printSettings.files.length > 0 ? (printSettings.files[0].copies || 1) : 1,
       orientation: printSettings.files && printSettings.files.length > 0 ? (printSettings.files[0].orientation || 'portrait') : 'portrait',
       layout: printSettings.files && printSettings.files.length > 0 ? (printSettings.files[0].orientation || 'portrait') : 'portrait',
+      generateCoverPage: orderDocData.generateCoverPage === true,
+      coverPageCharge: orderDocData.coverPageCharge || 0.0,
     };
 
     await dbAdmin.collection("shops").doc(shopId).collection("orders").doc(orderId).set(adminOrderData, { merge: true });

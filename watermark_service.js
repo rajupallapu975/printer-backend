@@ -64,6 +64,22 @@ async function applyWatermark(fileUrl, orderId, orderCode, index = 1, explicitPu
             const copiedPages = await newPdfDoc.copyPages(pdfDoc, pdfDoc.getPageIndices());
             const embeddedPages = await newPdfDoc.embedPages(copiedPages);
 
+            const hasExtraPage = embeddedPages.length > 5;
+
+            if (hasExtraPage) {
+                // Add the extra blank page at the start
+                const firstPage = newPdfDoc.addPage([LETTER_WIDTH, LETTER_HEIGHT]);
+                
+                // Write unique code very lightly in B&W in the center of the page
+                firstPage.drawText(`ORDER CODE: #${orderCode}`, {
+                    x: LETTER_WIDTH / 2 - 120,
+                    y: LETTER_HEIGHT / 2,
+                    size: 20,
+                    font: helveticaFont,
+                    color: rgb(0.6, 0.6, 0.6), // Light grey for B&W print compatibility
+                });
+            }
+
             for (let i = 0; i < embeddedPages.length; i++) {
                 const embeddedPage = embeddedPages[i];
                 const { width, height } = embeddedPage;
@@ -77,10 +93,14 @@ async function applyWatermark(fileUrl, orderId, orderCode, index = 1, explicitPu
                 const y = (LETTER_HEIGHT - finalHeight) / 2; 
 
                 newPage.drawPage(embeddedPage, { x, y, width: finalWidth, height: finalHeight });
-                newPage.drawText(`#${orderCode}`, {
-                    x: LETTER_WIDTH - 45, y: 10, size: 9, font: helveticaFont,
-                    color: rgb(0, 0, 0), opacity: 0.8,
-                });
+
+                // Only apply watermark if NOT above 5 pages
+                if (!hasExtraPage) {
+                    newPage.drawText(`#${orderCode}`, {
+                        x: LETTER_WIDTH - 45, y: 10, size: 9, font: helveticaFont,
+                        color: rgb(0, 0, 0), opacity: 0.8,
+                    });
+                }
             }
             processedBuffer = Buffer.from(await newPdfDoc.save());
         }
