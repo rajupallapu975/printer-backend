@@ -203,10 +203,26 @@ function watchOrderCompletion() {
                 if (change.type === "added" || (change.type === "modified" && change.doc.data().orderStatus === "printing completed")) {
                     const data = change.doc.data();
                     
+                    // 🛡️ 1. FIREBASE DEDUPLICATION: Skip if notification was already sent
+                    if (data.notificationSent === true) return;
+
                     // Prevent duplicate alerts (Use a 15-second freshness window)
                     const now = Date.now();
                     const updateTime = data.printedAt ? data.printedAt.toMillis() : now;
                     if (now - updateTime > 15000) return;
+
+                    // 🛡️ 2. Write to Firestore immediately to prevent concurrent triggers
+                    try {
+                        await dbCustomer.collection("xerox_orders").doc(change.doc.id).update({
+                            notificationSent: true
+                        });
+                    } catch (err) {
+                        console.error(`⚠️ Deduplication update failed for ${change.doc.id}:`, err.message);
+                        return; // Skip sending if another watcher instance already updated it
+                    }
+
+                    // Attach orderId securely
+                    data.orderId = change.doc.id;
 
                     console.log(`🖨️ Order Printed: ${data.orderCode || data.pickupCode} (User: ${data.userId})`);
                     await sendUserCompletionAlert(data);
