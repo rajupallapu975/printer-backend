@@ -252,14 +252,14 @@ async function sendUserCompletionAlert(data) {
         const orderLabel = orderNumber ? `Order #${orderNumber}` : `Order #${data.orderCode || data.pickupCode || orderId}`;
         const message = {
             notification: {
-                title: `Order #${orderCode} — Print Successful! 🎉`,
-                body: `Your prints for Order #${orderCode} are ready! Please visit the shop to collect them.`
+                title: `${orderLabel} — Print Successful! 🎉`,
+                body: `Your prints for ${orderLabel} are ready! Please visit the shop to collect them.`
             },
             data: {
                 click_action: "FLUTTER_NOTIFICATION_CLICK",
                 category: "order_completed",
                 orderId: orderId,
-                orderCode: orderCode
+                orderLabel: orderLabel
             },
             token: fcmToken,
             android: { 
