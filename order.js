@@ -269,7 +269,6 @@ async function createOrder(printSettings, razorpayOrderId = null, amount = 0, to
       status: razorpayOrderId ? "CREATED" : "ACTIVE",
       orderStatus: "not printed yet",
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      expiresAt: admin.firestore.Timestamp.fromDate(new Date(Date.now() + 24 * 60 * 60 * 1000)), // 24h expiry
       fileUrls: printSettings.files ? printSettings.files.map(f => f.url).filter(u => u !== undefined) : [],
       publicIds: [],
       razorpayOrderId: razorpayOrderId || null,

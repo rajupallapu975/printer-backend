@@ -10,64 +10,12 @@ async function performCleanup() {
     console.log(`[${new Date().toISOString()}] 🧹 Starting background cleanup task...`);
 
     try {
-        const now = new Date();
-        const tenMinsAgo = new Date(now.getTime() - 10 * 60 * 1000);
-        const collections = ["xerox_orders"];
-        let totalProcessed = 0;
-        let totalFound = 0;
-
-        for (const colName of collections) {
-            console.log(`🔍 Checking collection: ${colName}`);
-            
-            // Query 1: Standard Expiry (Includes the 10-min window set during delivery)
-            const snapshot = await db.collection(colName)
-                .where("expiresAt", "<=", now)
-                .limit(100) // Process in batches
-                .get();
-
-            if (snapshot.empty) {
-                console.log(`✅ No expired/completed orders ready for cleanup in ${colName}.`);
-                continue;
-            }
-
-            console.log(`🔍 Found ${snapshot.size} expired/completed orders in ${colName}. Processing...`);
-            totalFound += snapshot.size;
-
-            for (const doc of snapshot.docs) {
-                try {
-                    const data = doc.data();
-                    
-                    // Skip if already cleaned (Extra safety)
-                    if (data.cleanupStatus === 'CLEANED' && !data.expiresAt) continue;
-
-                    // Perform Cleanup
-                    await cleanupOrder(doc.id, data, colName);
-                    
-                    // 🛡️ CRITICAL: Remove expiresAt so it doesn't get picked up again
-                    await db.collection(colName).doc(doc.id).update({
-                        expiresAt: null,
-                        cleanupStatus: 'CLEANED',
-                        cleanedAt: admin.firestore.FieldValue.serverTimestamp()
-                    }).catch(() => null);
-
-                    totalProcessed++;
-                } catch (err) {
-                    console.error(`❌ Failed to cleanup order ${doc.id} in ${colName}:`, err.message);
-                }
-            }
-        }
-
-        const duration = ((Date.now() - startTime) / 1000).toFixed(2);
-        if (totalProcessed > 0) {
-            console.log(`[${new Date().toISOString()}] ✨ Cleanup finished. Processed ${totalProcessed}/${totalFound} orders in ${duration}s.`);
-        }
-
-        // 🕵️ EXTRA: Deep Orphaned cleanup (Rare, once per cycle)
-        if (Math.random() < 0.1) { // 10% chance to trigger deep cleanup during regular task
+        // 🕵️ Deep Orphaned Cloudinary cleanup (10% chance per cycle)
+        if (Math.random() < 0.1) {
             await cleanupOrphanedCloudinaryAssets().catch(() => null);
         }
 
-        return { success: true, processed: totalProcessed, total: totalFound };
+        return { success: true, processed: 0, total: 0 };
 
     } catch (error) {
         console.error("❌ CRITICAL: Cleanup task failed:", error);
