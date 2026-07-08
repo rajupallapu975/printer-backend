@@ -246,16 +246,20 @@ async function sendUserCompletionAlert(data) {
         const fcmToken = userDoc.data()?.fcmToken;
         if (!fcmToken) return;
 
-        // 🛡️ 2. PRIVACY-FIRST BODY (No Greetings, No Code Revealed)
+        // e.g. customId = "order_3" → display as "Order #3"
+        const rawCustomId = data.customId || '';
+        const orderNumber = rawCustomId.replace(/^order_/i, '').trim();
+        const orderLabel = orderNumber ? `Order #${orderNumber}` : `Order #${data.orderCode || data.pickupCode || orderId}`;
         const message = {
             notification: {
-                title: "Print Successful! 🎉",
-                body: "Your prints are ready! Please visit the shop to collect them. Visit again!"
+                title: `Order #${orderCode} — Print Successful! 🎉`,
+                body: `Your prints for Order #${orderCode} are ready! Please visit the shop to collect them.`
             },
             data: {
                 click_action: "FLUTTER_NOTIFICATION_CLICK",
                 category: "order_completed",
-                orderId: orderId
+                orderId: orderId,
+                orderCode: orderCode
             },
             token: fcmToken,
             android: { 
