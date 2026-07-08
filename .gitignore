@@ -13,6 +13,8 @@ yarn-error.log*
 
 # Firebase Secrets (DO NOT DEPLOY)
 serviceAccountKey.json
+serviceAccountKey2.json
+serviceAccountKey3.json
 adminServiceAccountKey.json
 # Local Uploads
 uploads/
