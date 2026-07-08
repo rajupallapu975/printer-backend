@@ -203,22 +203,36 @@ function watchOrderCompletion() {
                 if (change.type === "added" || (change.type === "modified" && change.doc.data().orderStatus === "printing completed")) {
                     const data = change.doc.data();
                     
-                    // 🛡️ 1. FIREBASE DEDUPLICATION: Skip if notification was already sent
-                    if (data.notificationSent === true) return;
-
                     // Prevent duplicate alerts (Use a 15-second freshness window)
                     const now = Date.now();
                     const updateTime = data.printedAt ? data.printedAt.toMillis() : now;
                     if (now - updateTime > 15000) return;
 
-                    // 🛡️ 2. Write to Firestore immediately to prevent concurrent triggers
+                    // 🛡️ 1. Transaction Deduplication Lock: atomically check and set notificationSent
+                    const orderRef = dbCustomer.collection("xerox_orders").doc(change.doc.id);
+                    let shouldSend = false;
+
                     try {
-                        await dbCustomer.collection("xerox_orders").doc(change.doc.id).update({
-                            notificationSent: true
+                        await dbCustomer.runTransaction(async (transaction) => {
+                            const sfDoc = await transaction.get(orderRef);
+                            if (!sfDoc.exists) return;
+
+                            const oData = sfDoc.data();
+                            if (oData.notificationSent === true) {
+                                return; // Already sent by another instance
+                            }
+
+                            transaction.update(orderRef, { notificationSent: true });
+                            shouldSend = true;
                         });
                     } catch (err) {
-                        console.error(`⚠️ Deduplication update failed for ${change.doc.id}:`, err.message);
-                        return; // Skip sending if another watcher instance already updated it
+                        console.error(`⚠️ Transaction check failed for ${change.doc.id}:`, err.message);
+                        return;
+                    }
+
+                    if (!shouldSend) {
+                        console.log(`⏭️ Duplicate alert skipped: ${change.doc.id} already processed.`);
+                        return;
                     }
 
                     // Attach orderId securely
