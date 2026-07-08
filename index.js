@@ -188,18 +188,19 @@ app.post("/verify-payment", async (req, res, next) => {
       paymentStatus: "PAID",
       status: "ACTIVE",
     };
-    await db.collection(mainCollection).doc(result.orderId).update(updateData);
+    await result.db.collection(mainCollection).doc(result.orderId).update(updateData);
     // 🛡️ Admin sync removed from here to prevent incomplete orders from showing up.
     // It is now moved to /complete-order which is called after file upload success.
     // Get final order data to return
-    const finalDoc = await db.collection(mainCollection).doc(result.orderId).get();
+    const finalDoc = await result.db.collection(mainCollection).doc(result.orderId).get();
     const finalData = finalDoc.data();
     res.json({
       success: true,
       orderId: result.orderId,
       pickupCode: finalData.pickupCode,
       xeroxId: finalData.xeroxId || null,
-      orderCode: finalData.orderCode || null
+      orderCode: finalData.orderCode || null,
+      projectId: result.projectId
     });
   } catch (error) {
     console.error("❌ Payment verification error:", error);
@@ -228,13 +229,13 @@ app.post("/complete-order", async (req, res, next) => {
     // 🛠️ Collection and config
     const collectionName = "xerox_orders";
     const activeConfig = configB;
-    // 1. Efficiently update Customer DB
-    const orderRef = db.collection(collectionName).doc(orderId);
-    const orderDoc = await orderRef.get();
+    const { findCustomerOrder } = require("./firebase");
+    const { doc: orderDoc, db: targetDb } = await findCustomerOrder(orderId);
     
-    if (!orderDoc.exists) {
+    if (!orderDoc || !orderDoc.exists) {
       return res.status(404).json({ error: "Order not found" });
     }
+    const orderRef = targetDb.collection(collectionName).doc(orderId);
     const currentData = orderDoc.data();
     let updatedFiles = [...(currentData.printSettings?.files || [])];
     
@@ -414,7 +415,7 @@ app.post("/complete-order", async (req, res, next) => {
         generatedCoverPage: generateCoverPageEnabled,
       };
 
-      await db.collection(collectionName).doc(orderId).update(updateData);
+      await orderRef.update(updateData);
 
       if (shopId) {
         console.log(`📡 Mirroring finalized Order ${orderId} to Shop Dashboard...`);
@@ -429,7 +430,7 @@ app.post("/complete-order", async (req, res, next) => {
         console.error("❌ Processing Failure (HARD PURGE):", err.message);
         
         try {
-          const orderDoc = await db.collection(collectionName).doc(orderId).get();
+          const orderDoc = await orderRef.get();
           if (orderDoc.exists) {
             const data = orderDoc.data();
             const paymentId = data.razorpayPaymentId;
@@ -458,7 +459,7 @@ app.post("/complete-order", async (req, res, next) => {
 
             // 🔥 3. HARD DELETE RECORD (BOTH COLLECTIONS)
             console.log(`🧹 Cleaning up Firebase traces for failed order ${orderId}...`);
-            await db.collection(collectionName).doc(orderId).delete();
+            await orderRef.delete();
             
             if (data.shopId) {
               await dbAdmin.collection("shops").doc(data.shopId).collection("orders").doc(orderId).delete().catch(() => null);
@@ -504,18 +505,8 @@ app.post("/mark-printed", async (req, res, next) => {
 
     // 1. Try to update Customer DB
     try {
-      const collection = "xerox_orders";
-      let orderDoc = await db.collection(collection).doc(orderId).get();
-      
-      if (!orderDoc.exists) {
-        const snap = await db.collection(collection).where("orderCode", "==", orderId).limit(1).get();
-        if (!snap.empty) orderDoc = snap.docs[0];
-      }
-      
-      if (!orderDoc.exists) {
-        const snap = await db.collection(collection).where("pickupCode", "==", orderId).limit(1).get();
-        if (!snap.empty) orderDoc = snap.docs[0];
-      }
+      const { findCustomerOrderByIdOrCode } = require("./firebase");
+      const { doc: orderDoc } = await findCustomerOrderByIdOrCode(orderId);
 
       if (orderDoc.exists) {
         const orderData = orderDoc.data();
@@ -589,9 +580,10 @@ app.post("/mark-delivered", async (req, res, next) => {
       let foundData = null;
       let foundCol = collection;
 
-      // 🔍 1. Find the order in xerox_orders
-      const doc = await db.collection(collection).doc(orderId).get();
-      if (doc.exists) {
+      // 🔍 1. Find the order in customer databases
+      const { findCustomerOrder } = require("./firebase");
+      const { doc, db: targetDb } = await findCustomerOrder(orderId);
+      if (doc && doc.exists) {
         foundData = doc.data();
       }
 
@@ -648,7 +640,7 @@ app.post("/mark-delivered", async (req, res, next) => {
          await deleteOrderFilesFromCloudinary(orderId, foundData, foundCol).catch(() => null);
 
          // 2.5️⃣ MARK FILES AS DELETED IN FIREBASE
-         await db.collection(foundCol).doc(orderId).update({
+         await targetDb.collection(foundCol).doc(orderId).update({
              filesDeleted: true,
              orderStatus: 'files purged',
              status: 'completed',
@@ -657,7 +649,7 @@ app.post("/mark-delivered", async (req, res, next) => {
 
          // 3️⃣ DELETE CUSTOMER RECORD
          console.log(`🔥 Hard Deleting Customer Record for ${orderId} in ${foundCol}`);
-         await db.collection(foundCol).doc(orderId).delete().catch(() => null);
+         await targetDb.collection(foundCol).doc(orderId).delete().catch(() => null);
       }
     } catch (err) {
       console.error("Cleanup/Transaction Error:", err.message);
@@ -684,8 +676,9 @@ app.post("/delete-order-files", async (req, res, next) => {
     let colForDeletion = "xerox_orders";
 
     // Check xerox_orders
-    const doc = await db.collection(colForDeletion).doc(orderId).get();
-    if (doc.exists) {
+    const { findCustomerOrder } = require("./firebase");
+    const { doc } = await findCustomerOrder(orderId);
+    if (doc && doc.exists) {
         dataForDeletion = doc.data();
     }
 

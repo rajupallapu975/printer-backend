@@ -194,9 +194,17 @@ async function sendShopkeeperOrderAlert(shopId) {
 
 // 🛡️ 3. Watch for Order Completion (Customer Alert - User App)
 function watchOrderCompletion() {
-    console.log("📡 Listening for Order Completion (User App Alerts)...");
+    console.log("📡 Listening for Order Completion (User App Alerts) across all customer databases...");
     
-    dbCustomer.collection("xerox_orders")
+    const { dbCustomer, dbCustomer2, dbCustomer3 } = require("./firebase");
+    
+    watchOrderCompletionForDb(dbCustomer, "Primary");
+    if (dbCustomer2) watchOrderCompletionForDb(dbCustomer2, "Backup 1");
+    if (dbCustomer3) watchOrderCompletionForDb(dbCustomer3, "Backup 2");
+}
+
+function watchOrderCompletionForDb(dbInstance, dbName) {
+    dbInstance.collection("xerox_orders")
         .where("orderStatus", "==", "printing completed")
         .onSnapshot(async (snapshot) => {
             snapshot.docChanges().forEach(async (change) => {
@@ -209,11 +217,11 @@ function watchOrderCompletion() {
                     if (now - updateTime > 15000) return;
 
                     // 🛡️ 1. Transaction Deduplication Lock: atomically check and set notificationSent
-                    const orderRef = dbCustomer.collection("xerox_orders").doc(change.doc.id);
+                    const orderRef = dbInstance.collection("xerox_orders").doc(change.doc.id);
                     let shouldSend = false;
 
                     try {
-                        await dbCustomer.runTransaction(async (transaction) => {
+                        await dbInstance.runTransaction(async (transaction) => {
                             const sfDoc = await transaction.get(orderRef);
                             if (!sfDoc.exists) return;
 
@@ -226,23 +234,23 @@ function watchOrderCompletion() {
                             shouldSend = true;
                         });
                     } catch (err) {
-                        console.error(`⚠️ Transaction check failed for ${change.doc.id}:`, err.message);
+                        console.error(`⚠️ Transaction check failed for ${change.doc.id} on ${dbName}:`, err.message);
                         return;
                     }
 
                     if (!shouldSend) {
-                        console.log(`⏭️ Duplicate alert skipped: ${change.doc.id} already processed.`);
+                        console.log(`⏭️ Duplicate alert skipped: ${change.doc.id} already processed on ${dbName}.`);
                         return;
                     }
 
                     // Attach orderId securely
                     data.orderId = change.doc.id;
 
-                    console.log(`🖨️ Order Printed: ${data.orderCode || data.pickupCode} (User: ${data.userId})`);
+                    console.log(`🖨️ Order Printed on ${dbName}: ${data.orderCode || data.pickupCode} (User: ${data.userId})`);
                     await sendUserCompletionAlert(data);
                 }
             });
-        }, (err) => console.error(`❌ xerox_orders Listener Error:`, err.message));
+        }, (err) => console.error(`❌ [${dbName}] xerox_orders Listener Error:`, err.message));
 }
 
 const notifiedRecently = new Set(); // 🛡️ Memory Cache to prevent double-firing

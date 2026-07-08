@@ -1,4 +1,4 @@
-const { dbCustomer: db, dbAdmin, admin } = require("./firebase");
+const { dbCustomer: db, dbCustomer2, dbCustomer3, dbAdmin, findCustomerOrder, admin } = require("./firebase");
 /* =================================================
    HELPERS
 ================================================= */
@@ -278,15 +278,46 @@ async function createOrder(printSettings, razorpayOrderId = null, amount = 0, to
       customId: customId || null, // Sequential ID (order_1, order_2)
     };
 
-    // ⚡ CUSTOMER WRITE LOGIC
-    await db.collection(customerCollection).doc(orderId).set(orderData);
+    // ⚡ CUSTOMER WRITE LOGIC (With Dynamic project failover rotation)
+    let activeDb = db;
+    let activeProjectId = 'psfc-43b5a';
+    
+    const dbCandidates = [
+      { instance: db, id: 'psfc-43b5a' },
+      { instance: dbCustomer2, id: 'zikrint-944a4' },
+      { instance: dbCustomer3, id: 'think-ink' }
+    ].filter(c => c.instance !== null && c.instance !== undefined);
+
+    let writeSucceeded = false;
+    let lastError = null;
+
+    for (const cand of dbCandidates) {
+      try {
+        activeDb = cand.instance;
+        activeProjectId = cand.id;
+        orderData.projectId = activeProjectId;
+        await activeDb.collection(customerCollection).doc(orderId).set(orderData);
+        writeSucceeded = true;
+        break;
+      } catch (err) {
+        lastError = err;
+        console.warn(`⚠️ Write failed on Firebase project ${cand.id}: ${err.message}. Trying next candidate...`);
+      }
+    }
+
+    if (!writeSucceeded) {
+      console.error("❌ CREATE ORDER DB ERROR: All Firebase projects exhausted.");
+      throw lastError || new Error("All Firebase databases exhausted");
+    }
     
     return {
       orderId,
       pickupCode: orderData.pickupCode,
       xeroxId: orderData.xeroxId, // Firestore shop doc ID
       orderCode: xeroxCode,
-      amount: breakdown.totalAmount
+      amount: breakdown.totalAmount,
+      db: activeDb,
+      projectId: activeProjectId
     };
   } catch (err) {
     console.error("❌ CREATE ORDER DB ERROR:", err.message);
@@ -302,9 +333,8 @@ async function createOrder(printSettings, razorpayOrderId = null, amount = 0, to
  */
 async function syncOrderToAdmin(orderId, watermarkedResults = null) {
   try {
-    const collectionName = "xerox_orders";
-    const doc = await db.collection(collectionName).doc(orderId).get();
-    if (!doc.exists) throw new Error(`Order ${orderId} not found in ${collectionName}`);
+    const { doc } = await findCustomerOrder(orderId);
+    if (!doc || !doc.exists) throw new Error(`Order ${orderId} not found in any customer database`);
     
     const orderDocData = doc.data();
     const { printSettings, userId, amount: finalAmount, orderCode } = orderDocData;
