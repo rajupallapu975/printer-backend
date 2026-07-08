@@ -18,6 +18,12 @@ const configC = {
     api_secret: process.env.CLOUDINARY_API_SECRET_C || 'MixGRPAiS5TTNiHL9PtZkavZAdk'
 };
 
+const configD = {
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME_D || 'xinscuby',
+    api_key: process.env.CLOUDINARY_API_KEY_D || '721284446485429',
+    api_secret: process.env.CLOUDINARY_API_SECRET_D || 'NlAe-fbZfCmCb16gfUjzMJJUJWE'
+};
+
 cloudinary.config(configB);
 
 function getConfigForUrl(url) {
@@ -25,6 +31,7 @@ function getConfigForUrl(url) {
     const lowerUrl = url.toLowerCase();
     if (lowerUrl.includes('doymq9qhk')) return configB;
     if (lowerUrl.includes('irtchxuf')) return configC;
+    if (lowerUrl.includes('xinscuby')) return configD;
     if (lowerUrl.includes('dpmpyvmbg')) return configA;
     return configB; // fallback to B
 }
@@ -119,4 +126,4 @@ function getSignedUrl(url, config, downloadName = null, explicitPublicId = null,
     }
 }
 
-module.exports = { cloudinary, configB, configA, configC, getConfigForUrl, getSignedUrl };
+module.exports = { cloudinary, configB, configA, configC, configD, getConfigForUrl, getSignedUrl };
