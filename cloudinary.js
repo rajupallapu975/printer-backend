@@ -1,23 +1,44 @@
 const cloudinary = require("cloudinary").v2;
 
-// Primary Cloudinary (Xerox Shop)
+const configA = {
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME || 'dpmpyvmbg',
+    api_key: process.env.CLOUDINARY_API_KEY || '194276163111927',
+    api_secret: process.env.CLOUDINARY_API_SECRET || 'sPSxs3tCdPiSLL_osGPLRoWEvhI'
+};
+
 const configB = {
-    cloud_name: process.env.CLOUDINARY_CLOUD_NAME_B,
-    api_key: process.env.CLOUDINARY_API_KEY_B,
-    api_secret: process.env.CLOUDINARY_API_SECRET_B
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME_B || 'doymq9qhk',
+    api_key: process.env.CLOUDINARY_API_KEY_B || '662529823584638',
+    api_secret: process.env.CLOUDINARY_API_SECRET_B || 'FqATV3gRRcCX9nQsuM-sB66BPYU'
+};
+
+const configC = {
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME_C || 'irtchxuf',
+    api_key: process.env.CLOUDINARY_API_KEY_C || '258315148822261',
+    api_secret: process.env.CLOUDINARY_API_SECRET_C || 'MixGRPAiS5TTNiHL9PtZkavZAdk'
 };
 
 cloudinary.config(configB);
+
+function getConfigForUrl(url) {
+    if (!url || typeof url !== 'string') return configB;
+    const lowerUrl = url.toLowerCase();
+    if (lowerUrl.includes('doymq9qhk')) return configB;
+    if (lowerUrl.includes('irtchxuf')) return configC;
+    if (lowerUrl.includes('dpmpyvmbg')) return configA;
+    return configB; // fallback to B
+}
 
 function getSignedUrl(url, config, downloadName = null, explicitPublicId = null, explicitVersion = null) {
     if (!url || (!url.includes('api.cloudinary.com') && !url.includes('res.cloudinary.com'))) return url;
     if (url.includes('api.cloudinary.com')) return url; // Do not attempt to sign API links with CDN signatures
     try {
+        const resolvedConfig = getConfigForUrl(url);
         const cloudinary = require("cloudinary").v2;
         cloudinary.config({
-            cloud_name: config.cloud_name,
-            api_key: config.api_key,
-            api_secret: config.api_secret
+            cloud_name: resolvedConfig.cloud_name,
+            api_key: resolvedConfig.api_key,
+            api_secret: resolvedConfig.api_secret
         });
 
         // 🚀 RESOLVE: Get the clean Public ID
@@ -98,4 +119,4 @@ function getSignedUrl(url, config, downloadName = null, explicitPublicId = null,
     }
 }
 
-module.exports = { cloudinary, configB, getSignedUrl };
+module.exports = { cloudinary, configB, configA, configC, getConfigForUrl, getSignedUrl };

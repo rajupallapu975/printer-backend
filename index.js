@@ -267,7 +267,12 @@ app.post("/complete-order", async (req, res, next) => {
     // 2. 🔐 IMMEDIATELY UNLOCK FILES
     if (publicIds && publicIds.length > 0) {
       try {
-        console.log(`🔓 Unlocking ${publicIds.length} files (Order ${orderId})...`);
+        const { getConfigForUrl } = require("./cloudinary");
+        const firstUrl = fileUrls && fileUrls.length > 0 ? fileUrls[0] : null;
+        const resolvedConfig = getConfigForUrl(firstUrl);
+        cloudinary.config(resolvedConfig);
+
+        console.log(`🔓 Unlocking ${publicIds.length} files (Order ${orderId}) on account ${resolvedConfig.cloud_name}...`);
         await Promise.all(publicIds.map(async (pid) => {
           // 🚀 SELF-HEALING: Try stripping folder prefixes if root asset exists
           const parts = pid.split('/');
@@ -340,6 +345,11 @@ app.post("/complete-order", async (req, res, next) => {
         const coverFileName = `${orderCode}_cover`;
         
         console.log(`📤 Uploading cover page to Cloudinary...`);
+        const { getConfigForUrl } = require("./cloudinary");
+        const firstUrl = fileUrls && fileUrls.length > 0 ? fileUrls[0] : null;
+        const resolvedConfig = getConfigForUrl(firstUrl);
+        cloudinary.config(resolvedConfig);
+
         const uploadResult = await new Promise((resolve, reject) => {
             const uploadStream = cloudinary.uploader.upload_stream({
                 folder: folderName,

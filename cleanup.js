@@ -1,5 +1,5 @@
 const { dbCustomer: db, dbAdmin, admin } = require("./firebase");
-const { cloudinary, configB } = require("./cloudinary");
+const { cloudinary, configB, getConfigForUrl } = require("./cloudinary");
 const razorpayInstance = require("./razorpay");
 
 // ============================================================================
@@ -41,7 +41,9 @@ async function deleteOrderFilesFromCloudinary(orderId, orderData, colName) {
     }
 
     // 2️⃣ PREFIX-BASED PURGE (Aggressive - catches untracked files like "602862_1" or "file")
-    cloudinary.config(configB);
+    const firstUrl = orderData.fileUrls && orderData.fileUrls.length > 0 ? orderData.fileUrls[0] : null;
+    const resolvedConfig = getConfigForUrl(firstUrl);
+    cloudinary.config(resolvedConfig);
 
     if (displayCode) {
         const foldersToTry = ["xerox_orders", "xerox_processed_orders", "xerox_shop"];
