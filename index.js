@@ -628,6 +628,27 @@ app.post("/mark-delivered", async (req, res, next) => {
                    orderId: orderId,
                  });
                  
+                 const historyRef = shopRef.collection("history").doc(orderId);
+                 transaction.set(historyRef, {
+                   orderId: orderId,
+                   orderCode: aData.orderCode || orderId,
+                   customerName: aData.customerName || 'Guest',
+                   amount: totalAmount,
+                   printingCost: merchantAmount,
+                   platformCommission: platformEarnings,
+                   bwPages: Number(aData.bwPages || 0),
+                   colorPages: Number(aData.colorPages || 0),
+                   isDuplex: aData.isDuplex === true,
+                   copies: Number(aData.copies || 1),
+                   serviceName: aData.serviceName || 'Documents (Xerox)',
+                   fileName: 'Files Purged',
+                   fileUrls: [],
+                   viewUrls: [],
+                   fileNames: [],
+                   collectedAt: admin.firestore.FieldValue.serverTimestamp(),
+                   timestamp: aData.timestamp || admin.firestore.FieldValue.serverTimestamp(),
+                 });
+
                  transaction.delete(adminOrderRef);
                  console.log(`🤑 Admin Mirror Purged for ${orderId}`);
                }
