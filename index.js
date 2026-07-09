@@ -668,8 +668,30 @@ app.post("/mark-delivered", async (req, res, next) => {
                    timestamp: aData.timestamp || admin.firestore.FieldValue.serverTimestamp(),
                  });
 
-                 transaction.delete(adminOrderRef);
-                 console.log(`🤑 Admin Mirror Purged for ${orderId}`);
+                  transaction.delete(adminOrderRef);
+
+                  // ✅ Credit platform/admin wallet
+                  const platformWalletRef = dbAdmin.collection('platform').doc('wallet');
+                  transaction.set(platformWalletRef, {
+                    totalEarnings: admin.firestore.FieldValue.increment(platformEarnings),
+                    totalOrders: admin.firestore.FieldValue.increment(1),
+                    lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
+                  }, { merge: true });
+
+                  // ✅ Log platform transaction
+                  transaction.set(dbAdmin.collection('platform').doc('wallet').collection('transactions').doc(), {
+                    orderId: orderId,
+                    orderCode: aData.orderCode || orderId,
+                    shopId: shopId,
+                    totalAmount: totalAmount,
+                    platformCommission: aData.platformEarnings || aData.platformCommission || 0,
+                    coverPageShare: platformCoverShare,
+                    totalPlatformEarnings: platformEarnings,
+                    shopkeeperPayout: merchantAmount,
+                    timestamp: admin.firestore.FieldValue.serverTimestamp(),
+                  });
+
+                  console.log(`🤑 Split — Shopkeeper: ₹${merchantAmount.toFixed(2)}, Platform: ₹${platformEarnings.toFixed(2)} for ${orderId}`);
                }
              });
            } catch (e) { console.error("Wallet Sync Error:", e.message); }
