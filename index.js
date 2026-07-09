@@ -614,15 +614,22 @@ app.post("/mark-delivered", async (req, res, next) => {
                         ? Number(aData.platformCommission)
                         : 0.0);
                  
-                 // Add cover page charge to platform/admin earnings
-                 platformEarnings += coverPageCharge;
+                 // Split cover page charge 50/50 (1 rupee to shopkeeper, 1 rupee to platform/admin)
+                 const shopkeeperCoverShare = coverPageCharge / 2.0;
+                 const platformCoverShare = coverPageCharge - shopkeeperCoverShare;
+
+                 // Platform gets commission + its share of the cover page charge
+                 platformEarnings += platformCoverShare;
 
                  // Try to determine merchant earnings from available fields (shopkeeperEarnings or printingCost)
-                 const merchantAmount = aData.shopkeeperEarnings !== undefined
+                 let merchantAmount = aData.shopkeeperEarnings !== undefined
                     ? Number(aData.shopkeeperEarnings)
                     : (aData.printingCost !== undefined
                         ? Number(aData.printingCost)
-                        : totalAmount - platformEarnings);
+                        : totalAmount - platformEarnings - shopkeeperCoverShare);
+
+                 // Shopkeeper gets base printing cost + their share of the cover page charge
+                 merchantAmount += shopkeeperCoverShare;
                  
                  transaction.update(shopRef, {
                    walletBalance: (Number(sData.walletBalance) || 0) + merchantAmount,
