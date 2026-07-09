@@ -605,12 +605,20 @@ app.post("/mark-delivered", async (req, res, next) => {
                  if (aData.isPicked || aData.status === 'completed') return;
 
                  const totalAmount = Number(aData.amount || 0);
-                 const merchantAmount = aData.shopkeeperEarnings !== undefined
-                    ? Number(aData.shopkeeperEarnings)
-                    : totalAmount * 0.83;
+
+                 // Try to determine platform commission from available fields (platformEarnings or platformCommission)
                  const platformEarnings = aData.platformEarnings !== undefined
                     ? Number(aData.platformEarnings)
-                    : totalAmount - merchantAmount;
+                    : (aData.platformCommission !== undefined
+                        ? Number(aData.platformCommission)
+                        : 0.0);
+
+                 // Try to determine merchant earnings from available fields (shopkeeperEarnings or printingCost)
+                 const merchantAmount = aData.shopkeeperEarnings !== undefined
+                    ? Number(aData.shopkeeperEarnings)
+                    : (aData.printingCost !== undefined
+                        ? Number(aData.printingCost)
+                        : totalAmount - platformEarnings);
                  
                  transaction.update(shopRef, {
                    walletBalance: (Number(sData.walletBalance) || 0) + merchantAmount,
@@ -1465,6 +1473,41 @@ async function printActiveShopsOnStartup() {
     console.error("Error printing active shops summary:", err.message);
   }
 }
+
+// 🏪 SHOP HEARTBEAT AUTO-OFFLINE SWEEPER
+// Sweeps all shops once every 30 seconds and sets them offline if they haven't sent a heartbeat in the last 45 seconds
+setInterval(async () => {
+  try {
+    const cutoffTime = new Date(Date.now() - 45 * 1000); // 45 seconds ago
+    const querySnapshot = await dbAdmin.collection("shops")
+      .where("isOpen", "==", true)
+      .get();
+
+    const batch = dbAdmin.batch();
+    let count = 0;
+    
+    querySnapshot.forEach(doc => {
+      const data = doc.data();
+      const lastActive = data.lastActive ? data.lastActive.toDate() : null;
+      
+      // If lastActive is missing or older than 45 seconds, mark offline
+      if (!lastActive || lastActive < cutoffTime) {
+        batch.update(doc.ref, {
+          isOpen: false,
+          lastUpdatedAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+        count++;
+        console.log(`🏪 Auto-Offline: Shop ${doc.id} (${data.shopName || 'Unnamed'}) marked offline due to inactivity.`);
+      }
+    });
+
+    if (count > 0) {
+      await batch.commit();
+    }
+  } catch (error) {
+    console.error("❌ Shop Heartbeat Sweeper Error:", error.message);
+  }
+}, 30 * 1000);
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`
