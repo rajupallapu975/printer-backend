@@ -223,16 +223,7 @@ async function createOrder(printSettings, razorpayOrderId = null, amount = 0, to
     // Xerox Shop is now the only mode
     const customerCollection = "xerox_orders";
     let breakdown;
-    if (printSettings.serviceType === 'project_binding') {
-      breakdown = {
-        totalAmount: Number(printSettings.totalAmount),
-        printingCost: Number(printSettings.printingCost),
-        platformCommission: Number(printSettings.platformCommission),
-        commissionType: 'fixed',
-        commissionValue: Number(printSettings.platformCommission || 0),
-        shopPricingUsed: {},
-      };
-    } else if (printSettings.shopSubtotal !== undefined && printSettings.finalAmount !== undefined) {
+    if (printSettings.shopSubtotal !== undefined && printSettings.finalAmount !== undefined) {
       breakdown = {
         totalAmount: Number(printSettings.finalAmount),
         printingCost: Number(printSettings.shopSubtotal),
@@ -264,20 +255,13 @@ async function createOrder(printSettings, razorpayOrderId = null, amount = 0, to
       commissionType: breakdown.commissionType,
       commissionValue: breakdown.commissionValue,
       totalPaid: breakdown.totalAmount,
-      shopkeeperEarnings: printSettings.serviceType === 'project_binding' 
-        ? (Number(printSettings.printingCost || 0) + Number(printSettings.bindingCost || 0)) 
-        : breakdown.printingCost,
+      shopkeeperEarnings: breakdown.printingCost,
       platformEarnings: breakdown.platformCommission,
       shopPricingUsed: breakdown.shopPricingUsed,
       serviceId,
       serviceName,
       shopId: printSettings.shopId || '',
       shopName: printSettings.shopName || '',
-
-      serviceType: printSettings.serviceType || 'xerox',
-      paperSize: printSettings.paperSize || 'A4',
-      bindingType: printSettings.bindingType || '',
-      bindingCost: Number(printSettings.bindingCost || 0.0),
 
       printMode: 'xeroxShop',
       totalPages: totalPages || (printSettings.files ? printSettings.files.reduce((sum, f) => sum + (f.pageCount || 1) * (f.copies || 1), 0) : 0),
