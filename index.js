@@ -605,13 +605,17 @@ app.post("/mark-delivered", async (req, res, next) => {
                  if (aData.isPicked || aData.status === 'completed') return;
 
                  const totalAmount = Number(aData.amount || 0);
+                 const coverPageCharge = Number(aData.coverPageCharge || 0);
 
                  // Try to determine platform commission from available fields (platformEarnings or platformCommission)
-                 const platformEarnings = aData.platformEarnings !== undefined
+                 let platformEarnings = aData.platformEarnings !== undefined
                     ? Number(aData.platformEarnings)
                     : (aData.platformCommission !== undefined
                         ? Number(aData.platformCommission)
                         : 0.0);
+                 
+                 // Add cover page charge to platform/admin earnings
+                 platformEarnings += coverPageCharge;
 
                  // Try to determine merchant earnings from available fields (shopkeeperEarnings or printingCost)
                  const merchantAmount = aData.shopkeeperEarnings !== undefined
