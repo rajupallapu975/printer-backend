@@ -1282,7 +1282,7 @@ app.get("/api/shop/pending-paper-sizes", async (req, res, next) => {
 
 app.post("/api/shop/pricing", async (req, res, next) => {
   try {
-    const { shopId, serviceId, isEnabled, pricingData, bindingsPricing, contactNumber } = req.body;
+    const { shopId, serviceId, isEnabled, pricingData, bindingsPricing } = req.body;
     if (!shopId || !serviceId) {
       return res.status(400).json({ success: false, error: "shopId and serviceId are required" });
     }
@@ -1294,10 +1294,6 @@ app.post("/api/shop/pricing", async (req, res, next) => {
 
     if (bindingsPricing) {
       updateData[`zikrinterServices.${serviceId}.bindings`] = bindingsPricing;
-    }
-
-    if (contactNumber !== undefined) {
-      updateData[`zikrinterServices.${serviceId}.contactNumber`] = contactNumber;
     }
 
     if (pricingData) {
