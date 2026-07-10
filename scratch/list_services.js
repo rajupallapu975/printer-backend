@@ -1,17 +1,13 @@
 const { dbCustomer } = require("../firebase");
 
 async function main() {
-  const snap = await dbCustomer.collection("services").get();
-  console.log("=== BUILT-IN SERVICES ===");
-  let count = 0;
-  snap.forEach(doc => {
-    const data = doc.data();
-    if (data.isDeleted !== true) {
-      count++;
-      console.log(`- [${doc.id}] ${data.name} (Active: ${data.isActive})`);
-    }
+  console.log("Listing services from dbCustomer...");
+  const snapshot = await dbCustomer.collection("services").get();
+  snapshot.forEach(doc => {
+    console.log(`Service ID: ${doc.id}`);
+    console.log(JSON.stringify(doc.data(), null, 2));
+    console.log("-----------------------------------------");
   });
-  console.log(`Total Services: ${count}`);
   process.exit(0);
 }
 
