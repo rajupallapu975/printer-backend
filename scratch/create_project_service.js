@@ -15,7 +15,7 @@ async function main() {
     isActive: true,
     isDeleted: false,
     startingPrice: 10.0,
-    paperSizes: ["A4", "A3", "Legal"],
+    paperSizes: ["A4", "A3", "Legal", "Bond Paper (A4)"],
     images: [
       "https://res.cloudinary.com/dpmpyvmbg/image/upload/v1783599967/services/ib2sy2ghodvxllrpxeug.png"
     ],
@@ -32,6 +32,11 @@ async function main() {
         "commissionType": "percentage"
       },
       "legal_color_singleSide": {
+        "isEnabled": true,
+        "commission": 0.0,
+        "commissionType": "percentage"
+      },
+      "bond_paper_(a4)_color_singleSide": {
         "isEnabled": true,
         "commission": 0.0,
         "commissionType": "percentage"
