@@ -1054,7 +1054,14 @@ app.get("/api/services/:id/shops", async (req, res, next) => {
     if (!serviceDoc.exists || serviceDoc.data().isDeleted === true) {
       return res.status(404).json({ success: false, error: "Service not found" });
     }
-    const globalParams = serviceDoc.data().parameters || {};
+    let globalParams = serviceDoc.data().parameters || {};
+    if (serviceId === 'project_binding') {
+      const targetServiceId = sizeKey.includes('bond') ? 'nyAKL7mMnGGkTx2Ow9HA' : 'ZHwQd18Vy08TZkyBFXjB';
+      const targetServiceDoc = await dbCustomer.collection("services").doc(targetServiceId).get();
+      if (targetServiceDoc.exists) {
+        globalParams = targetServiceDoc.data().parameters || {};
+      }
+    }
 
     console.log(`\n🔍 [Shop Search] Querying eligible shops for Service ID: ${serviceId}, Paper Size: ${paperSize}`);
     const eligibleShops = [];
@@ -1062,7 +1069,24 @@ app.get("/api/services/:id/shops", async (req, res, next) => {
       const shopData = doc.data();
       const shopName = shopData.shopName || "Unknown Shop";
       const zikrinterServices = shopData.zikrinterServices || {};
-      const serviceConfig = zikrinterServices[serviceId];
+
+      let targetServiceId = serviceId;
+      let targetSizeKey = sizeKey;
+
+      if (serviceId === 'project_binding') {
+        const projectConfig = zikrinterServices['project_binding'];
+        if (!projectConfig || projectConfig.isEnabled !== true) {
+          console.log(` ❌ Shop [${shopName}] has disabled or not configured Project Binding.`);
+          continue;
+        }
+        const isBond = sizeKey.includes('bond');
+        targetServiceId = isBond ? 'nyAKL7mMnGGkTx2Ow9HA' : 'ZHwQd18Vy08TZkyBFXjB';
+        if (isBond) {
+          targetSizeKey = 'a4';
+        }
+      }
+
+      const serviceConfig = zikrinterServices[targetServiceId];
 
       const isBlocked = shopData.isBlocked === true;
       const isAcceptingOrders = shopData.isAcceptingOrders !== false;
@@ -1085,16 +1109,16 @@ app.get("/api/services/:id/shops", async (req, res, next) => {
         continue;
       }
       if (!serviceConfig) {
-        console.log(` ❌ Shop [${shopName}] has not configured this service.`);
+        console.log(` ❌ Shop [${shopName}] has not configured target service ${targetServiceId}.`);
         continue;
       }
       if (serviceConfig.isEnabled !== true) {
-        console.log(` ❌ Shop [${shopName}] has disabled this service.`);
+        console.log(` ❌ Shop [${shopName}] has disabled target service ${targetServiceId}.`);
         continue;
       }
 
       const paperSizesConfig = serviceConfig.paperSizes || {};
-      const sizeConfig = paperSizesConfig[sizeKey];
+      const sizeConfig = paperSizesConfig[targetSizeKey];
 
       let bwPrice = 0.0;
       let colorPrice = 0.0;
@@ -1102,16 +1126,16 @@ app.get("/api/services/:id/shops", async (req, res, next) => {
         bwPrice = Number(sizeConfig.bw?.singleSidePrice) || 0.0;
         colorPrice = Number(sizeConfig.color?.singleSidePrice) || 0.0;
       } else {
-        bwPrice = Number(serviceConfig[`${sizeKey}_bw_singleSidePrice`]) || 0.0;
-        colorPrice = Number(serviceConfig[`${sizeKey}_color_singleSidePrice`]) || 0.0;
-        if (sizeKey === 'a4') {
+        bwPrice = Number(serviceConfig[`${targetSizeKey}_bw_singleSidePrice`]) || 0.0;
+        colorPrice = Number(serviceConfig[`${targetSizeKey}_color_singleSidePrice`]) || 0.0;
+        if (targetSizeKey === 'a4') {
           bwPrice = Number(serviceConfig.bw_singleSidePrice) || bwPrice;
           colorPrice = Number(serviceConfig.color_singleSidePrice) || Number(serviceConfig.singleSidePrice) || colorPrice;
         }
       }
 
-      const bwSingleGlobal = globalParams[`${sizeKey}_bw_singleSide`] || globalParams.bw_singleSide || {};
-      const colorSingleGlobal = globalParams[`${sizeKey}_color_singleSide`] || globalParams.color_singleSide || {};
+      const bwSingleGlobal = globalParams[`${targetSizeKey}_bw_singleSide`] || globalParams.bw_singleSide || {};
+      const colorSingleGlobal = globalParams[`${targetSizeKey}_color_singleSide`] || globalParams.color_singleSide || {};
       const isBwEnabledGlobally = bwSingleGlobal.isEnabled === true || globalParams.bw_singleSide?.isEnabled === true;
       const isColorEnabledGlobally = colorSingleGlobal.isEnabled === true || globalParams.color_singleSide?.isEnabled === true;
 
