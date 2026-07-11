@@ -852,16 +852,44 @@ app.get("/proxy-download", async (req, res, next) => {
 // ============================================================================
 app.post("/set-shop-status", async (req, res, next) => {
   try {
-    const { shopId, isOpen } = req.body;
+    const { shopId, isOpen, sessionId } = req.body;
     if (!shopId) return res.status(400).json({ error: "shopId required" });
-    
-    await dbAdmin.collection("shops").doc(shopId).update({
-      isOpen: isOpen === true || isOpen === 'true',
-      lastUpdatedAt: admin.firestore.FieldValue.serverTimestamp()
-    });
 
-    console.log(`🏪 Shop ${shopId} marked as ${isOpen ? 'ONLINE' : 'OFFLINE'}`);
-    res.json({ success: true, message: `Shop ${shopId} is now ${isOpen ? 'online' : 'offline'}.` });
+    const isTargetOpen = isOpen === true || isOpen === 'true';
+    const shopRef = dbAdmin.collection("shops").doc(shopId);
+
+    if (!isTargetOpen) {
+      // Going offline: verify sessionId match if provided
+      const shopDoc = await shopRef.get();
+      if (!shopDoc.exists) {
+        return res.status(404).json({ error: "Shop not found" });
+      }
+
+      const shopData = shopDoc.data();
+      const currentActiveSessionId = shopData?.activeSessionId;
+
+      if (sessionId && currentActiveSessionId && currentActiveSessionId !== sessionId) {
+        console.log(`🏪 [Status API] Ignored offline request for shop ${shopId} due to session mismatch (Active: ${currentActiveSessionId}, Request: ${sessionId})`);
+        return res.json({ success: true, ignored: true, message: "Ignored request due to session ID mismatch" });
+      }
+
+      await shopRef.update({
+        isOpen: false,
+        lastUpdatedAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+      console.log(`🏪 Shop ${shopId} marked OFFLINE | Reason: session closed | SessionId: ${sessionId || 'N/A'}`);
+    } else {
+      // Going online
+      await shopRef.update({
+        isOpen: true,
+        activeSessionId: sessionId || null,
+        lastActive: admin.firestore.FieldValue.serverTimestamp(),
+        lastUpdatedAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+      console.log(`🏪 Shop ${shopId} marked ONLINE | SessionId: ${sessionId || 'N/A'}`);
+    }
+
+    res.json({ success: true, message: `Shop ${shopId} status updated successfully.` });
   } catch (error) {
     console.error("❌ Error setting shop status:", error);
     next(error);
