@@ -158,6 +158,28 @@ app.post("/verify-payment", async (req, res, next) => {
     if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
       return res.status(400).json({ error: "Payment details missing" });
     }
+
+    // Verify order ID belongs to expected application order and amount is valid
+    let rzpOrder;
+    try {
+      const razorpayInstance = require("./razorpay"); // ensure instance is accessible
+      rzpOrder = await razorpayInstance.orders.fetch(razorpay_order_id);
+    } catch (err) {
+      console.error("❌ Error fetching Razorpay order:", err);
+      return res.status(400).json({ success: false, error: "Razorpay order not found or invalid" });
+    }
+
+    if (!rzpOrder) {
+      return res.status(400).json({ success: false, error: "Razorpay order not found" });
+    }
+
+    // Validate expected payment/order state (amount matches)
+    const expectedAmountPaise = Math.round(amount * 100);
+    if (Math.abs(rzpOrder.amount - expectedAmountPaise) > 1) {
+      console.error(`❌ Razorpay order amount mismatch: expected ${expectedAmountPaise} paise, got ${rzpOrder.amount} paise`);
+      return res.status(400).json({ success: false, error: "Payment amount mismatch" });
+    }
+
     // Verify Signature
     const isMock = razorpay_signature === 'mock_signature_9750';
     if (!isMock) {
