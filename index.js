@@ -1582,10 +1582,10 @@ async function printActiveShopsOnStartup() {
 }
 
 // 🏪 SHOP HEARTBEAT AUTO-OFFLINE SWEEPER
-// Sweeps all shops once every 30 seconds and sets them offline if they haven't sent a heartbeat in the last 45 seconds
+// Sweeps all shops once every 30 seconds and sets them offline if they haven't sent a heartbeat in the last 180 seconds (3 minutes)
 setInterval(async () => {
   try {
-    const cutoffTime = new Date(Date.now() - 45 * 1000); // 45 seconds ago
+    const cutoffTime = new Date(Date.now() - 180 * 1000); // 180 seconds ago
     const querySnapshot = await dbAdmin.collection("shops")
       .where("isOpen", "==", true)
       .get();
@@ -1597,7 +1597,7 @@ setInterval(async () => {
       const data = doc.data();
       const lastActive = data.lastActive ? data.lastActive.toDate() : null;
       
-      // If lastActive is missing or older than 45 seconds, mark offline
+      // If lastActive is missing or older than 180 seconds, mark offline
       if (!lastActive || lastActive < cutoffTime) {
         batch.update(doc.ref, {
           isOpen: false,
