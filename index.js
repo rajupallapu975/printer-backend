@@ -1146,10 +1146,6 @@ app.get("/api/services/:id/shops", async (req, res, next) => {
         console.log(` ❌ Shop [${shopName}] is deactivated.`);
         continue;
       }
-      if (!isOpen) {
-        console.log(` ❌ Shop [${shopName}] is offline (isOpen = false).`);
-        continue;
-      }
       if (isBlocked) {
         console.log(` ❌ Shop [${shopName}] is blocked.`);
         continue;
