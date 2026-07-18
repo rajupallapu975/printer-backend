@@ -111,17 +111,20 @@ async function sendCaptainPayoutAlert(data, requestId) {
                 requestId: data?.requestId || ""
             },
             token: fcmToken,
-            android: { 
+            android: {
                 priority: "high",
             },
-            apns: { 
-                payload: { 
-                    aps: { 
-                        contentAvailable: true, 
+            apns: {
+                payload: {
+                    aps: {
+                        contentAvailable: true,
                         sound: "default",
                         badge: 1
-                    } 
-                } 
+                    }
+                }
+            },
+            webpush: {
+                headers: { Urgency: "high" }
             }
         };
 
@@ -182,7 +185,11 @@ async function sendShopkeeperOrderAlert(shopId) {
                     priority: "high"
                 }
             },
-            apns: { payload: { aps: { contentAvailable: true, sound: "default" } } }
+            apns: { payload: { aps: { contentAvailable: true, sound: "default" } } },
+            webpush: {
+                headers: { Urgency: "high" },
+                notification: { icon: "/icons/Icon-192.png", badge: "/favicon.png" }
+            }
         };
 
         const response = await admin.app('admin').messaging().send(message);
@@ -308,7 +315,11 @@ async function sendUserCompletionAlert(data) {
                     defaultSound: true
                 }
             },
-            apns: { payload: { aps: { contentAvailable: true, sound: "default" } } }
+            apns: { payload: { aps: { contentAvailable: true, sound: "default" } } },
+            webpush: {
+                headers: { Urgency: "high" },
+                notification: { icon: "/icons/Icon-192.png", badge: "/favicon.png" }
+            }
         };
 
         await admin.app('customer').messaging().send(message);
@@ -428,7 +439,11 @@ async function sendShopkeeperAlert(fcmToken, title, body) {
                     priority: "high"
                 }
             },
-            apns: { payload: { aps: { contentAvailable: true, sound: "default" } } }
+            apns: { payload: { aps: { contentAvailable: true, sound: "default" } } },
+            webpush: {
+                headers: { Urgency: "high" },
+                notification: { icon: "/icons/Icon-192.png", badge: "/favicon.png" }
+            }
         };
 
         const response = await admin.app('admin').messaging().send(message);
