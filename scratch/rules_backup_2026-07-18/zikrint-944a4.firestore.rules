@@ -1,0 +1,48 @@
+// ruleset: projects/zikrint-944a4/rulesets/41c1ef8f-d5bc-41e3-80ec-43fc98f7bf59
+// backed up: 2026-07-18T10:17:39.459Z
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Allow any authenticated user to read and write to the orders collection
+    match /orders/{orderId} {
+      allow read, write: if request.auth != null;
+    }
+    
+    // Allow any authenticated user to read and write to xerox_orders
+    match /xerox_orders/{orderId} {
+      allow read, write: if request.auth != null;
+    }
+
+    // Allow any authenticated user to read and write to the notifications collection
+    match /notifications/{notificationId} {
+      allow read, write: if request.auth != null;
+    }
+    
+    // Allow shop owners to manage their shop profiles and order subcollections
+    match /shops/{shopId} {
+      allow read, write: if request.auth != null;
+      
+      match /orders/{orderId} {
+        allow read, write: if request.auth != null;
+      }
+      
+      match /transactions/{transactionId} {
+        allow read, write: if request.auth != null;
+      }
+
+      match /history/{orderId} {
+        allow read, write: if request.auth != null;
+      }
+    }
+
+    // Allow any user to read app_config
+    match /app_config/{document} {
+      allow read: if true;
+    }
+
+    // Allow users to manage their own profile
+    match /users/{userId} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}

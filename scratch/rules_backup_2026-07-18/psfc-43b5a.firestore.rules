@@ -1,0 +1,43 @@
+// ruleset: projects/psfc-43b5a/rulesets/f89e3f5c-e525-489e-a83c-b73cfca5308f
+// backed up: 2026-07-18T10:17:34.877Z
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // 🖨️ Orders
+    match /orders/{orderId} {
+      allow read, write: if true;
+    }
+
+    match /xerox_orders/{orderId} {
+      allow read, write: if true;
+    }
+
+    // 🏪 Shops
+    match /shops/{shopId} {
+      allow read, write: if true;
+
+      match /orders/{orderId} {
+        allow read, write: if true;
+      }
+
+      match /transactions/{transactionId} {
+        allow read, write: if true;
+      }
+
+      match /printers/{printerId} {
+        allow read, write: if true;
+      }
+    }
+
+    // 🔔 Notifications
+    match /notifications/{notificationId} {
+      allow read, write: if true;
+    }
+
+    // 👤 Users
+    match /users/{userId} {
+      allow read, write: if true;
+    }
+  }
+}

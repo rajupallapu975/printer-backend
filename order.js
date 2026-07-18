@@ -212,7 +212,7 @@ async function generateUniquePickupCode() {
 /**
  * CREATE ORDER
  */
-async function createOrder(printSettings, razorpayOrderId = null, amount = 0, totalPages = 0, printMode = 'xeroxShop', userId = 'guest_user', customId = null, userEmail = null) {
+async function createOrder(printSettings, razorpayOrderId = null, amount = 0, totalPages = 0, printMode = 'xeroxShop', userId = 'guest_user', customId = null, userEmail = null, customerName = null) {
   try {
     if (!printSettings || typeof printSettings !== "object") {
       const err = new Error("Invalid printSettings");
@@ -246,6 +246,7 @@ async function createOrder(printSettings, razorpayOrderId = null, amount = 0, to
       orderId,
       userId,
       userEmail: userEmail || userId, // Display email in Admin App
+      customerName: customerName || userEmail || userId || 'Guest User',
       printSettings,
       
       // Dynamic Pricing & Splitting Metadata
@@ -394,7 +395,7 @@ async function syncOrderToAdmin(orderId, watermarkedResults = null) {
 
     const adminOrderData = {
       id: orderId,
-      customerName: orderDocData.userEmail || userId || 'Guest',
+      customerName: orderDocData.customerName || orderDocData.userEmail || userId || 'Guest',
       fileName: displayFileNames[0],
       bwPages: printSettings.files ? printSettings.files.reduce((sum, f) => sum + (f.color === 'BW' ? (f.pageCount || 1) * (f.copies || 1) : 0), 0) : 0,
       colorPages: printSettings.files ? printSettings.files.reduce((sum, f) => sum + (f.color === 'COLOR' ? (f.pageCount || 1) * (f.copies || 1) : 0), 0) : 0,

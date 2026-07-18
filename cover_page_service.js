@@ -196,8 +196,8 @@ async function generateCoverPage(orderData) {
     rect(c2X, cardY, cardW, cardH, { fill: WHITE, border: GREY_BORDER, bw: 0.8 });
     text('PRICE BREAKDOWN', c2X + 12, cardY + 74, 9, helveticaBold, BLACK);
 
-    const roundedFee = Math.ceil(orderData.platformFee || 2.0);
-    const coverCharge = orderData.coverPageCharge || 2.0;
+    const roundedFee = Math.ceil(typeof orderData.platformFee === 'number' ? orderData.platformFee : 2.0);
+    const coverCharge = typeof orderData.coverPageCharge === 'number' ? orderData.coverPageCharge : 2.0;
     const grandTotal  = subtotal + roundedFee + coverCharge;
 
     const priceRow = (label, amount, y) => {

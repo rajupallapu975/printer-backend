@@ -138,7 +138,8 @@ app.post("/verify-payment", async (req, res, next) => {
       userEmail,
       amount,
       totalPages,
-      customId
+      customId,
+      customerName
     } = req.body;
 
     console.log(`\n💳 [Verify Payment Step]`);
@@ -148,6 +149,7 @@ app.post("/verify-payment", async (req, res, next) => {
     console.log(`   - Total Pages: ${totalPages}`);
     console.log(`   - User ID: ${userId || 'guest_user'}`);
     console.log(`   - User Email: ${userEmail || 'N/A'}`);
+    console.log(`   - Customer Name: ${customerName || 'N/A'}`);
     if (printSettings.files && Array.isArray(printSettings.files)) {
       console.log(`   - Files:`);
       printSettings.files.forEach(f => {
@@ -200,7 +202,8 @@ app.post("/verify-payment", async (req, res, next) => {
       'xeroxShop',
       userId || 'guest_user',
       customId,
-      userEmail
+      userEmail,
+      customerName
     );
     const mainCollection = "xerox_orders";
     // Update with payment details in Customer DB
@@ -360,8 +363,12 @@ app.post("/complete-order", async (req, res, next) => {
           customId: freshData.customId || null,
           customerName: freshData.userEmail || freshData.userId || 'Guest User',
           files: formattedFiles,
-          coverPageCharge: 2.0,
-          platformFee: Number(freshData.platformCommission || freshData.printSettings?.commissionAmount || 2.0)
+          coverPageCharge: typeof freshData.printSettings?.coverPageCharge === 'number'
+            ? freshData.printSettings.coverPageCharge
+            : (typeof freshData.coverPageCharge === 'number' ? freshData.coverPageCharge : 2.0),
+          platformFee: typeof freshData.platformCommission === 'number'
+            ? freshData.platformCommission
+            : (typeof freshData.printSettings?.commissionAmount === 'number' ? freshData.printSettings.commissionAmount : 2.0)
         });
 
         const folderName = 'xerox_processed_orders';
