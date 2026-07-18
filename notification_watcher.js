@@ -136,25 +136,35 @@ async function sendCaptainPayoutAlert(data, requestId) {
 }
 
 // 🛡️ 2. Watch for New Shop Orders (Shopkeeper Alert)
-// Note: We use xerox_orders for global shop orders to simplify cross-shop monitoring
+// Note: We listen to all customer databases for xerox_orders when they are mirrored/completed
 function watchShopOrders() {
-    console.log("📡 Listening for Shop Orders (User App Sync)...");
-    dbAdmin.collection("xerox_orders")
-        .where("status", "in", ["not printed yet", "pending"])
+    console.log("📡 Listening for Shop Orders across all customer databases...");
+    const { dbCustomer2, dbCustomer3 } = require("./firebase");
+    
+    watchShopOrdersForDb(dbCustomer, "Primary");
+    if (dbCustomer2) watchShopOrdersForDb(dbCustomer2, "Backup 1");
+    if (dbCustomer3) watchShopOrdersForDb(dbCustomer3, "Backup 2");
+}
+
+function watchShopOrdersForDb(dbInstance, dbName) {
+    dbInstance.collection("xerox_orders")
+        .where("mirroredToAdmin", "==", true)
+        .where("orderStatus", "==", "not printed yet")
         .onSnapshot(async (snapshot) => {
             snapshot.docChanges().forEach(async (change) => {
-                if (change.type === "added") {
+                if (change.type === "added" || (change.type === "modified" && change.doc.data().mirroredToAdmin === true)) {
                     const data = change.doc.data();
                     
+                    // Prevent duplicate alerts (Use a 60-second freshness window for file uploads)
                     const now = Date.now();
-                    const orderTime = data.timestamp ? data.timestamp.toMillis() : now;
-                    if (now - orderTime > 15000) return; // Skip older orders
+                    const orderTime = data.createdAt ? data.createdAt.toMillis() : now;
+                    if (now - orderTime > 60000) return; // Skip older orders
 
-                    console.log(`📦 New Shop Order: ${data.shopId} - Ticket ${data.orderCode}`);
+                    console.log(`📦 New Shop Order: ${data.shopId} - Ticket ${data.orderCode} [${dbName}]`);
                     await sendShopkeeperOrderAlert(data.shopId);
                 }
             });
-        }, (err) => console.error("❌ Order Listener Error:", err.message));
+        }, (err) => console.error(`❌ [${dbName}] Shop Orders Listener Error:`, err.message));
 }
 
 async function sendShopkeeperOrderAlert(shopId) {
