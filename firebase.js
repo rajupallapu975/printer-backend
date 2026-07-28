@@ -82,6 +82,22 @@ if (!admin.apps.some(app => app.name === 'admin')) {
   adminApp = admin.app('admin');
 }
 
+// Fail fast with an explicit message. The catch blocks above only log, so without this
+// guard a bad credential surfaces as "Cannot read properties of undefined (reading
+// 'firestore')" — which says nothing about which project failed or why.
+if (!customerApp) {
+  throw new Error(
+    "Customer Firebase project failed to initialise (see the error logged above). " +
+    "Check FIREBASE_SERVICE_ACCOUNT or serviceAccountKey.json."
+  );
+}
+if (!adminApp) {
+  throw new Error(
+    "Admin Firebase project failed to initialise (see the error logged above). " +
+    "Check FIREBASE_SERVICE_ACCOUNT_ADMIN or adminServiceAccountKey.json."
+  );
+}
+
 const dbCustomer = customerApp.firestore();
 const dbAdmin = adminApp.firestore();
 

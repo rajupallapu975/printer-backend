@@ -11,11 +11,23 @@ async function performCleanup() {
 
     try {
         // 🕵️ Deep Orphaned Cloudinary cleanup (10% chance per cycle)
-        if (Math.random() < 0.1) {
+        //
+        // ⛔ DISABLED (Phase 0.5). cleanupOrphanedCloudinaryAssets decides a Cloudinary
+        // folder is orphaned by querying ONLY customer project 1, but createOrder fails
+        // over across three projects. Every live order that landed on project 2 or 3 looks
+        // orphaned to this sweep and has its files deleted while the customer is waiting
+        // for them.
+        //
+        // Re-enable only after Phase 3.1 makes the check consult all three projects AND
+        // treat a query error as "unknown" rather than "absent". Set
+        // CLEANUP_ORPHAN_SWEEP_ENABLED=true to opt back in (replaced by the Firestore
+        // feature-flag service in Phase 0.5.6).
+        const orphanSweepEnabled = process.env.CLEANUP_ORPHAN_SWEEP_ENABLED === 'true';
+        if (orphanSweepEnabled && Math.random() < 0.1) {
             await cleanupOrphanedCloudinaryAssets().catch(() => null);
         }
 
-        return { success: true, processed: 0, total: 0 };
+        return { success: true, processed: 0, total: 0, orphanSweepEnabled };
 
     } catch (error) {
         console.error("❌ CRITICAL: Cleanup task failed:", error);

@@ -1,38 +1,58 @@
 const cloudinary = require("cloudinary").v2;
 
-const configA = {
-    cloud_name: process.env.CLOUDINARY_CLOUD_NAME || 'dpmpyvmbg',
-    api_key: process.env.CLOUDINARY_API_KEY || '194276163111927',
-    api_secret: process.env.CLOUDINARY_API_SECRET || 'sPSxs3tCdPiSLL_osGPLRoWEvhI'
-};
+// Credentials come from the environment only. Never hardcode a fallback secret here —
+// a committed default cannot be rotated and silently outlives every key rotation.
+function requireEnv(name) {
+    const v = process.env[name];
+    if (!v) throw new Error(`Missing required env var: ${name}`);
+    return v;
+}
 
-const configB = {
-    cloud_name: process.env.CLOUDINARY_CLOUD_NAME_B || 'doymq9qhk',
-    api_key: process.env.CLOUDINARY_API_KEY_B || '662529823584638',
-    api_secret: process.env.CLOUDINARY_API_SECRET_B || 'FqATV3gRRcCX9nQsuM-sB66BPYU'
-};
+// Suffix '' is the legacy (account A) variable naming: CLOUDINARY_CLOUD_NAME etc.
+function loadConfig(suffix, { required = false } = {}) {
+    const names = {
+        cloud_name: `CLOUDINARY_CLOUD_NAME${suffix}`,
+        api_key: `CLOUDINARY_API_KEY${suffix}`,
+        api_secret: `CLOUDINARY_API_SECRET${suffix}`,
+    };
+    if (required) {
+        return {
+            cloud_name: requireEnv(names.cloud_name),
+            api_key: requireEnv(names.api_key),
+            api_secret: requireEnv(names.api_secret),
+        };
+    }
+    const values = {
+        cloud_name: process.env[names.cloud_name],
+        api_key: process.env[names.api_key],
+        api_secret: process.env[names.api_secret],
+    };
+    if (!values.cloud_name || !values.api_key || !values.api_secret) {
+        console.warn(`⚠️ Cloudinary account '${suffix || 'A'}' not configured; URLs on that account will fall back to account B.`);
+        return null;
+    }
+    return values;
+}
 
-const configC = {
-    cloud_name: process.env.CLOUDINARY_CLOUD_NAME_C || 'irtchxuf',
-    api_key: process.env.CLOUDINARY_API_KEY_C || '258315148822261',
-    api_secret: process.env.CLOUDINARY_API_SECRET_C || 'MixGRPAiS5TTNiHL9PtZkavZAdk'
-};
-
-const configD = {
-    cloud_name: process.env.CLOUDINARY_CLOUD_NAME_D || 'xinscuby',
-    api_key: process.env.CLOUDINARY_API_KEY_D || '721284446485429',
-    api_secret: process.env.CLOUDINARY_API_SECRET_D || 'NlAe-fbZfCmCb16gfUjzMJJUJWE'
-};
+// B is the active account (see cloudinary.config below), so it is the only hard requirement.
+// A, C and D are legacy accounts that only need to resolve for pre-existing asset URLs.
+const configB = loadConfig('_B', { required: true });
+const configA = loadConfig('');
+const configC = loadConfig('_C');
+const configD = loadConfig('_D');
 
 cloudinary.config(configB);
 
+// Maps a stored asset URL back to the account that hosts it. Any account that is not
+// configured resolves to B rather than undefined, so a missing legacy credential
+// degrades to a failed signature instead of a TypeError.
 function getConfigForUrl(url) {
     if (!url || typeof url !== 'string') return configB;
     const lowerUrl = url.toLowerCase();
-    if (lowerUrl.includes('doymq9qhk')) return configB;
-    if (lowerUrl.includes('irtchxuf')) return configC;
-    if (lowerUrl.includes('xinscuby')) return configD;
-    if (lowerUrl.includes('dpmpyvmbg')) return configA;
+    if (lowerUrl.includes(configB.cloud_name)) return configB;
+    if (configC && lowerUrl.includes(configC.cloud_name)) return configC;
+    if (configD && lowerUrl.includes(configD.cloud_name)) return configD;
+    if (configA && lowerUrl.includes(configA.cloud_name)) return configA;
     return configB; // fallback to B
 }
 

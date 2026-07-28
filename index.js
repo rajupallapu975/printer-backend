@@ -2,6 +2,10 @@
 // DEPENDENCIES
 // ============================================================================
 require('dotenv').config();
+// Validate configuration before any module that depends on it is loaded, so a missing
+// credential surfaces as a startup error naming the variable rather than a confusing
+// runtime failure deep inside a payment or upload path.
+require("./config").validateEnvironment();
 const express = require("express");
 const cors = require("cors");
 const crypto = require("crypto");
@@ -15,6 +19,7 @@ const { performCleanup, cleanupOrder, deleteOrderFilesFromCloudinary } = require
 const { createOrder, syncOrderToAdmin, generateUniquePickupCode } = require("./order");
 const { applyWatermark } = require("./watermark_service");
 const { generateCoverPage } = require("./cover_page_service");
+const { requireAdminKey } = require("./auth");
 require("./notification_watcher"); // 🚀 Start background listeners
 // ============================================================================
 // EXPRESS APP SETUP
@@ -45,14 +50,11 @@ app.get("/", (req, res) => {
     timestamp: new Date().toISOString(),
   });
 });
-// Manual/Scheduled cleanup trigger
-app.get("/run-cleanup", async (req, res) => {
+// Manual/Scheduled cleanup trigger.
+// 🔒 Admin-guarded. The previous CLEANUP_KEY check was a no-op whenever CLEANUP_KEY was
+// unset, which left a destructive maintenance operation publicly callable.
+app.get("/run-cleanup", requireAdminKey, async (req, res) => {
   try {
-    const key = req.query.key;
-    // Security check (Optional: add CLEANUP_KEY to your .env)
-    if (process.env.CLEANUP_KEY && key !== process.env.CLEANUP_KEY) {
-      return res.status(401).json({ error: "Unauthorized. Invalid key." });
-    }
     console.log("🚀 Manually triggered cleanup...");
     const result = await performCleanup();
     res.json(result);
@@ -182,16 +184,20 @@ app.post("/verify-payment", async (req, res, next) => {
       return res.status(400).json({ success: false, error: "Payment amount mismatch" });
     }
 
-    // Verify Signature
-    const isMock = razorpay_signature === 'mock_signature_9750';
-    if (!isMock) {
-      const body = razorpay_order_id + "|" + razorpay_payment_id;
-      const expectedSignature = crypto
-        .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
-        .update(body.toString()).digest("hex");
-      if (expectedSignature !== razorpay_signature) {
-        return res.status(400).json({ success: false, error: "Invalid payment signature" });
-      }
+    // Verify Signature. There is deliberately no bypass branch here: a hardcoded
+    // "mock signature" accepted in production lets anyone mint a paid order for free.
+    const body = razorpay_order_id + "|" + razorpay_payment_id;
+    const expectedSignature = crypto
+      .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
+      .update(body).digest("hex");
+    const providedSignature = String(razorpay_signature);
+    // Length must match before timingSafeEqual, which throws on unequal buffer lengths.
+    const signatureValid =
+      providedSignature.length === expectedSignature.length &&
+      crypto.timingSafeEqual(Buffer.from(providedSignature), Buffer.from(expectedSignature));
+    if (!signatureValid) {
+      console.error(`❌ Invalid payment signature for order ${razorpay_order_id}`);
+      return res.status(400).json({ success: false, error: "Invalid payment signature" });
     }
     // Create Order in Firestore
     const result = await createOrder(
@@ -426,7 +432,10 @@ app.post("/complete-order", async (req, res, next) => {
         );
 
         finalFileUrls = watermarkedResults.map((r, i) => r.url || fileUrls[i]);
-        finalPublicIds = watermarkedResults.map((r, i) => r.publicId || publicIds[i]);
+        // Must read incomingPublicIds (from the order document), not the request body's
+        // publicIds — a request that omits publicIds would throw here, and the catch
+        // below refunds and hard-deletes a valid paid order.
+        finalPublicIds = watermarkedResults.map((r, i) => r.publicId || incomingPublicIds[i]);
         printSequence = files.map((f, i) => `file${i+1}`);
       }
 
@@ -795,7 +804,11 @@ app.post("/delete-order-files", async (req, res, next) => {
 // ============================================================================
 // ENDPOINT: REFUND PAYMENT
 // ============================================================================
-app.post("/refund-payment", async (req, res, next) => {
+// 🔒 Admin-guarded: this route refunds arbitrary Razorpay payments for arbitrary amounts.
+// It has no legitimate unauthenticated caller — the customer app's refundPayment() is a
+// best-effort fire-and-forget call that already treats failure as non-fatal.
+// Phase 1 additionally sources the amount from the order record instead of the request body.
+app.post("/refund-payment", requireAdminKey, async (req, res, next) => {
   try {
     const { razorpay_payment_id, amount } = req.body;
     if (!razorpay_payment_id) {
@@ -826,6 +839,127 @@ app.post("/refund-payment", async (req, res, next) => {
     });
   }
 });
+
+// ============================================================================
+// ENDPOINTS: WITHDRAWAL MANAGEMENT (Phase 4.2)
+// ============================================================================
+// 🔒 Admin-guarded: process payout approvals and rejections server-side.
+// Replaces direct client writes to `withdrawal_requests` and `shops/{shopId}`.
+
+app.post("/api/v1/admin/withdrawal/:id/approve", requireAdminKey, async (req, res) => {
+  const reqId = req.params.id;
+  if (!reqId) {
+    return res.status(400).json({ success: false, error: "Withdrawal request ID is required" });
+  }
+
+  try {
+    const reqRef = dbAdmin.collection("withdrawal_requests").doc(reqId);
+    const reqSnap = await reqRef.get();
+    if (!reqSnap.exists) {
+      return res.status(404).json({ success: false, error: "Withdrawal request not found" });
+    }
+
+    const reqData = reqSnap.data() || {};
+    if (reqData.status === "paid") {
+      return res.status(400).json({ success: false, error: "Withdrawal request is already processed/paid" });
+    }
+
+    const shopId = reqData.shopId;
+    const amount = Number(reqData.amount);
+    const upiApp = reqData.upiApp || "UPI";
+    const shopName = reqData.shopName || "Shop";
+
+    if (!shopId || isNaN(amount) || amount <= 0) {
+      return res.status(400).json({ success: false, error: "Invalid withdrawal request data" });
+    }
+
+    const shopRef = dbAdmin.collection("shops").doc(shopId);
+
+    // Atomic transaction using Admin SDK
+    await dbAdmin.runTransaction(async (tx) => {
+      const shopSnap = await tx.get(shopRef);
+      if (!shopSnap.exists) {
+        throw new Error(`Shop document '${shopId}' not found.`);
+      }
+
+      const shopData = shopSnap.data() || {};
+      const liveBalance = Number(shopData.walletBalance || 0);
+
+      if (liveBalance < amount) {
+        throw new Error(`Insufficient wallet balance in shop. (Available: ₹${liveBalance}, Requested: ₹${amount})`);
+      }
+
+      // 1. Deduct balance from shop wallet
+      tx.update(shopRef, { walletBalance: liveBalance - amount });
+
+      // 2. Add transaction record to shop ledger
+      const transRef = shopRef.collection("transactions").doc();
+      tx.set(transRef, {
+        amount,
+        title: `Withdrawal Approved — ${upiApp}`,
+        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+        type: "debit",
+        status: "paid",
+        requestId: reqId
+      });
+
+      // 3. Mark withdrawal request as paid
+      tx.update(reqRef, {
+        status: "paid",
+        processedAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+    });
+
+    console.log(`✅ [WITHDRAWAL] Payout of ₹${amount} approved for shop '${shopName}' (${shopId})`);
+    return res.json({
+      success: true,
+      message: `Payout of ₹${amount} successfully approved for ${shopName}`
+    });
+  } catch (error) {
+    console.error("❌ [WITHDRAWAL] Approval error:", error);
+    return res.status(500).json({
+      success: false,
+      error: error.message || "Failed to process withdrawal approval"
+    });
+  }
+});
+
+app.post("/api/v1/admin/withdrawal/:id/reject", requireAdminKey, async (req, res) => {
+  const reqId = req.params.id;
+  if (!reqId) {
+    return res.status(400).json({ success: false, error: "Withdrawal request ID is required" });
+  }
+
+  try {
+    const reqRef = dbAdmin.collection("withdrawal_requests").doc(reqId);
+    const reqSnap = await reqRef.get();
+    if (!reqSnap.exists) {
+      return res.status(404).json({ success: false, error: "Withdrawal request not found" });
+    }
+
+    const reqData = reqSnap.data() || {};
+    if (reqData.status === "paid" || reqData.status === "rejected") {
+      return res.status(400).json({ success: false, error: `Withdrawal request is already ${reqData.status}` });
+    }
+
+    await reqRef.update({
+      status: "rejected",
+      processedAt: admin.firestore.FieldValue.serverTimestamp()
+    });
+
+    console.log(`❌ [WITHDRAWAL] Request ${reqId} marked as rejected.`);
+    return res.json({
+      success: true,
+      message: "Withdrawal request rejected."
+    });
+  } catch (error) {
+    console.error("❌ [WITHDRAWAL] Rejection error:", error);
+    return res.status(500).json({
+      success: false,
+      error: error.message || "Failed to process withdrawal rejection"
+    });
+  }
+});
 // ============================================================================
 // ENDPOINT: PROXY DOWNLOAD (Fixes CORS & Filenames for API links)
 // ============================================================================
@@ -833,19 +967,50 @@ app.get("/proxy-download", async (req, res, next) => {
   try {
     const { url, filename } = req.query;
     if (!url) return res.status(400).json({ error: "URL is required" });
-    
-    console.log(`📡 [PROXY] Downloading: ${filename}`);
+
+    // Host allowlist. Without it this endpoint proxies any URL the host can reach,
+    // including cloud metadata endpoints and internal services (SSRF).
+    let parsedUrl;
+    try {
+      parsedUrl = new URL(String(url));
+    } catch (_) {
+      return res.status(400).json({ error: "Malformed URL" });
+    }
+    const ALLOWED_DOWNLOAD_HOSTS = new Set(['res.cloudinary.com', 'api.cloudinary.com']);
+    if (parsedUrl.protocol !== 'https:' || !ALLOWED_DOWNLOAD_HOSTS.has(parsedUrl.hostname)) {
+      console.warn(`⚠️ [PROXY] Blocked disallowed download host: ${parsedUrl.hostname}`);
+      return res.status(400).json({ error: "Unsupported download host" });
+    }
+
+    // Strip anything that could break out of the quoted header value.
+    const safeName = String(filename || 'download.pdf').replace(/[^A-Za-z0-9._-]/g, '_');
+
+    console.log(`📡 [PROXY] Downloading: ${safeName}`);
     const axios = require('axios');
-    const response = await axios.get(url, { 
+    const MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024; // bound the transfer; unbounded proxying is a DoS vector
+    const response = await axios.get(parsedUrl.toString(), {
       responseType: 'stream',
+      timeout: 30000,
+      maxContentLength: MAX_DOWNLOAD_BYTES,
+      maxBodyLength: MAX_DOWNLOAD_BYTES,
+      maxRedirects: 0, // a redirect could hop off the allowlisted host
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
       }
     });
-    
-    res.setHeader('Content-Disposition', `attachment; filename="${filename || 'download.pdf'}"`);
+
+    res.setHeader('Content-Disposition', `attachment; filename="${safeName}"`);
     res.setHeader('Content-Type', 'application/octet-stream');
-    
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+
+    // Don't leak the upstream socket if the client goes away mid-download.
+    res.on('close', () => response.data.destroy());
+    response.data.on('error', (streamErr) => {
+      console.error("❌ [PROXY] Upstream stream error:", streamErr.message);
+      if (!res.headersSent) res.status(502).json({ error: "Upstream download failed" });
+      else res.destroy();
+    });
+
     response.data.pipe(res);
   } catch (error) {
     console.error("❌ Proxy Download Failed:", error.message);
