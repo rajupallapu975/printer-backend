@@ -594,7 +594,13 @@ app.post("/mark-printed", async (req, res, next) => {
         customerDocUpdated = true;
         console.log(`✅ Customer DB updated for ${orderId}`);
         
-        const resolvedShopId = shopId || orderData.shopId;
+        const isReviewerTest = (orderData.userEmail && orderData.userEmail.toLowerCase().includes('reviewer')) ||
+                               (orderData.customerName && orderData.customerName.toLowerCase().includes('reviewer')) ||
+                               (orderData.userId && orderData.userId.toLowerCase().includes('reviewer')) ||
+                               (orderData.customId && orderData.customId.toLowerCase().includes('reviewer')) ||
+                               (orderId && orderId.toLowerCase().includes('reviewer'));
+
+        const resolvedShopId = isReviewerTest ? 'reviewer_shop_store' : (shopId || orderData.shopId);
         if (resolvedShopId) {
           await dbAdmin.collection("shops").doc(resolvedShopId).collection("orders").doc(orderId).update({
             orderStatus: 'printing completed',

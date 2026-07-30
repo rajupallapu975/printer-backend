@@ -339,7 +339,21 @@ async function syncOrderToAdmin(orderId, watermarkedResults = null) {
     
     const orderDocData = doc.data();
     const { printSettings, userId, amount: finalAmount, orderCode } = orderDocData;
-    const shopId = orderDocData.shopId;
+    let shopId = orderDocData.shopId;
+    
+    // 🛡️ DEDICATED TESTER STORE ISOLATION:
+    // Route any reviewer/tester order exclusively to 'reviewer_shop_store' so real shops are never touched.
+    const isReviewerTest = (orderDocData.userEmail && orderDocData.userEmail.toLowerCase().includes('reviewer')) ||
+                           (orderDocData.customerName && orderDocData.customerName.toLowerCase().includes('reviewer')) ||
+                           (orderDocData.userId && orderDocData.userId.toLowerCase().includes('reviewer')) ||
+                           (orderDocData.customId && orderDocData.customId.toLowerCase().includes('reviewer')) ||
+                           (orderId && orderId.toLowerCase().includes('reviewer'));
+
+    if (isReviewerTest) {
+      shopId = 'reviewer_shop_store';
+      console.log(`🤖 Tester/Reviewer order ${orderId} detected. Routing strictly to 'reviewer_shop_store'.`);
+    }
+
     if (!shopId) return;
 
     // 🌊 WATERMARK: Use newly processed results if available, else fall back to existing data
