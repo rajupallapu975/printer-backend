@@ -63,6 +63,34 @@ app.get("/run-cleanup", requireAdminKey, async (req, res) => {
   }
 });
 // ============================================================================
+// ENDPOINT: AUTH CONFIG (GET & POST for showEmailLogin feature flag)
+// ============================================================================
+app.get("/auth-config", async (req, res) => {
+  try {
+    const doc = await db.collection("app_config").doc("auth").get();
+    const data = doc.exists ? doc.data() : { showEmailLogin: true };
+    res.json({ success: true, showEmailLogin: !!data.showEmailLogin });
+  } catch (error) {
+    console.error("❌ Error reading auth config:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.post("/auth-config", requireAdminKey, async (req, res) => {
+  try {
+    const { showEmailLogin } = req.body;
+    await db.collection("app_config").doc("auth").set(
+      { showEmailLogin: !!showEmailLogin, updatedAt: new Date().toISOString() },
+      { merge: true }
+    );
+    res.json({ success: true, showEmailLogin: !!showEmailLogin });
+  } catch (error) {
+    console.error("❌ Error updating auth config:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ============================================================================
 // ENDPOINT: FETCH LIVE XEROX SHOPS (From Admin Firebase)
 // ============================================================================
 app.get("/get-xerox-shops", async (req, res, next) => {

@@ -1,3 +1,4 @@
+require('dotenv').config();
 const { dbAdmin, findCustomerOrder, dbCustomer } = require("../firebase");
 const { createOrder, syncOrderToAdmin } = require("../order");
 
