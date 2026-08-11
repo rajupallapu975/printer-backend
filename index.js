@@ -617,8 +617,6 @@ app.post("/mark-printed", async (req, res, next) => {
         await orderDoc.ref.update({
           orderStatus: 'printing completed',
           printStatus: 'printed',
-          status: 'ready',
-          isPrintingCompleted: true,
           printedAt: admin.firestore.FieldValue.serverTimestamp(),
         });
         customerDocUpdated = true;
@@ -743,17 +741,11 @@ app.post("/mark-delivered", async (req, res, next) => {
                  // Shopkeeper gets base printing cost + their share of the cover page charge
                  merchantAmount += shopkeeperCoverShare;
                  
-                 const serviceNameKey = (aData.serviceType || aData.serviceName || aData.bindingType || 'Document Printing / Xerox').replace(/[\.\/\$\#\[\]]/g, '_');
-                 transaction.set(shopRef, {
+                 transaction.update(shopRef, {
                    walletBalance: (Number(sData.walletBalance) || 0) + merchantAmount,
                    totalBwPages: (Number(sData.totalBwPages) || 0) + (Number(aData.bwPages) || 0),
                    totalColorPages: (Number(sData.totalColorPages) || 0) + (Number(aData.colorPages) || 0),
-                   completedOrdersCount: admin.firestore.FieldValue.increment(1),
-                   activeOrdersCount: admin.firestore.FieldValue.increment(-1),
-                   [`serviceStats.${serviceNameKey}.completedCount`]: admin.firestore.FieldValue.increment(1),
-                   [`serviceStats.${serviceNameKey}.activeCount`]: admin.firestore.FieldValue.increment(-1),
-                   lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
-                 }, { merge: true });
+                 });
 
                  transaction.set(shopRef.collection("transactions").doc(), {
                    amount: merchantAmount,
@@ -824,8 +816,6 @@ app.post("/mark-delivered", async (req, res, next) => {
              filesDeleted: true,
              orderStatus: 'files purged',
              status: 'completed',
-             isPicked: true,
-             orderDone: true,
              purgedAt: admin.firestore.FieldValue.serverTimestamp()
          }).catch(() => null);
 
@@ -1155,15 +1145,8 @@ app.post("/set-shop-status", async (req, res, next) => {
 // ============================================================================
 async function incrementServiceVersion() {
   const increment = admin.firestore.FieldValue.increment(1);
-  const now = admin.firestore.FieldValue.serverTimestamp();
-  const payload = { version: increment, updatedAt: now };
-
-  await Promise.allSettled([
-    dbCustomer.collection("shops").doc("serviceVersion").set(payload, { merge: true }),
-    dbAdmin.collection("shops").doc("serviceVersion").set(payload, { merge: true }),
-    dbCustomer.collection("app_config").doc("services_version").set(payload, { merge: true }),
-    dbAdmin.collection("app_config").doc("services_version").set(payload, { merge: true }),
-  ]);
+  await dbCustomer.collection("shops").doc("serviceVersion").set({ version: increment }, { merge: true });
+  await dbAdmin.collection("shops").doc("serviceVersion").set({ version: increment }, { merge: true });
 }
 
 app.get("/api/config/version", async (req, res, next) => {

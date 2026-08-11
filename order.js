@@ -450,19 +450,6 @@ async function syncOrderToAdmin(orderId, watermarkedResults = null) {
     };
 
     await dbAdmin.collection("shops").doc(shopId).collection("orders").doc(orderId).set(adminOrderData, { merge: true });
-    
-    // 📊 Update shop-wise active order stats per service
-    try {
-      const serviceNameKey = (adminOrderData.serviceType || adminOrderData.serviceName || adminOrderData.bindingType || 'Document Printing / Xerox').replace(/[\.\/\$\#\[\]]/g, '_');
-      await dbAdmin.collection("shops").doc(shopId).set({
-        activeOrdersCount: admin.firestore.FieldValue.increment(1),
-        [`serviceStats.${serviceNameKey}.activeCount`]: admin.firestore.FieldValue.increment(1),
-        lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
-      }, { merge: true });
-    } catch (sErr) {
-      console.warn("⚠️ Shop active stats update error:", sErr.message);
-    }
-
     console.log(`✅ Order ${orderId} successfully synced to Admin project.`);
   } catch (error) {
     console.error(`❌ Admin sync failed for ${orderId}:`, error.message);
