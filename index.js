@@ -617,6 +617,8 @@ app.post("/mark-printed", async (req, res, next) => {
         await orderDoc.ref.update({
           orderStatus: 'printing completed',
           printStatus: 'printed',
+          status: 'ready',
+          isPrintingCompleted: true,
           printedAt: admin.firestore.FieldValue.serverTimestamp(),
         });
         customerDocUpdated = true;
@@ -822,6 +824,8 @@ app.post("/mark-delivered", async (req, res, next) => {
              filesDeleted: true,
              orderStatus: 'files purged',
              status: 'completed',
+             isPicked: true,
+             orderDone: true,
              purgedAt: admin.firestore.FieldValue.serverTimestamp()
          }).catch(() => null);
 

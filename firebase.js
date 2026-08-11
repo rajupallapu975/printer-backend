@@ -146,6 +146,9 @@ async function findCustomerOrderByIdOrCode(orderId) {
     
     snap = await dbCustomer.collection("xerox_orders").where("pickupCode", "==", orderId).limit(1).get();
     if (!snap.empty) return { doc: snap.docs[0], db: dbCustomer, projectId: 'psfc-43b5a' };
+
+    snap = await dbCustomer.collection("xerox_orders").where("customId", "==", orderId).limit(1).get();
+    if (!snap.empty) return { doc: snap.docs[0], db: dbCustomer, projectId: 'psfc-43b5a' };
   } catch (e) { /* skip */ }
 
   // Search DB 2
@@ -158,6 +161,9 @@ async function findCustomerOrderByIdOrCode(orderId) {
       if (!snap.empty) return { doc: snap.docs[0], db: dbCustomer2, projectId: 'zikrint-944a4' };
       
       snap = await dbCustomer2.collection("xerox_orders").where("pickupCode", "==", orderId).limit(1).get();
+      if (!snap.empty) return { doc: snap.docs[0], db: dbCustomer2, projectId: 'zikrint-944a4' };
+
+      snap = await dbCustomer2.collection("xerox_orders").where("customId", "==", orderId).limit(1).get();
       if (!snap.empty) return { doc: snap.docs[0], db: dbCustomer2, projectId: 'zikrint-944a4' };
     } catch (e) { /* skip */ }
   }
@@ -172,6 +178,9 @@ async function findCustomerOrderByIdOrCode(orderId) {
       if (!snap.empty) return { doc: snap.docs[0], db: dbCustomer3, projectId: 'think-ink' };
       
       snap = await dbCustomer3.collection("xerox_orders").where("pickupCode", "==", orderId).limit(1).get();
+      if (!snap.empty) return { doc: snap.docs[0], db: dbCustomer3, projectId: 'think-ink' };
+
+      snap = await dbCustomer3.collection("xerox_orders").where("customId", "==", orderId).limit(1).get();
       if (!snap.empty) return { doc: snap.docs[0], db: dbCustomer3, projectId: 'think-ink' };
     } catch (e) { /* skip */ }
   }
