@@ -91,6 +91,30 @@ app.post("/auth-config", requireAdminKey, async (req, res) => {
 });
 
 // ============================================================================
+// ENDPOINT: REVIEWER CUSTOM AUTH TOKEN (Fallback for disabled Email Auth)
+// ============================================================================
+app.post("/api/reviewer-token", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    const cleanEmail = (email || "").trim().toLowerCase();
+    const cleanPass = (password || "").trim();
+
+    if (cleanEmail === "reviewer@zikrint.app" && cleanPass === "raju@975") {
+      const token = await admin.auth().createCustomToken("reviewer_user", {
+        email: "reviewer@zikrint.app",
+        role: "reviewer"
+      });
+      console.log("🔑 Issued custom token for reviewer@zikrint.app");
+      return res.json({ success: true, token });
+    }
+    return res.status(401).json({ success: false, error: "Invalid reviewer credentials" });
+  } catch (err) {
+    console.error("❌ Reviewer Token Error:", err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ============================================================================
 // ENDPOINT: FETCH LIVE XEROX SHOPS (From Admin Firebase)
 // ============================================================================
 app.get("/get-xerox-shops", async (req, res, next) => {
