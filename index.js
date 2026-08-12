@@ -238,13 +238,17 @@ app.post("/verify-payment", async (req, res, next) => {
       return res.status(400).json({ error: "Payment details missing" });
     }
 
-    // 🛡️ Reviewer Test Account Bypass Check
-    const isReviewerTest = (userEmail && userEmail.toLowerCase().includes('reviewer')) || 
-                           (customerName && customerName.toLowerCase().includes('reviewer')) ||
-                           (customId && customId.toLowerCase().includes('reviewer')) ||
+    // 🛡️ Test Account Bypass Check (Test Mails Bypass Payment Safely)
+    const lowerEmail = (userEmail || '').toLowerCase();
+    const lowerName = (customerName || '').toLowerCase();
+    const lowerCustom = (customId || '').toLowerCase();
+    const lowerUser = (userId || '').toLowerCase();
+    const isReviewerTest = lowerEmail.includes('reviewer') || lowerEmail.includes('test') || lowerEmail.includes('tester') || lowerEmail.includes('demo') ||
+                           lowerName.includes('reviewer') || lowerName.includes('tester') || lowerName.includes('test') ||
+                           lowerCustom.includes('reviewer') || lowerCustom.includes('test') ||
+                           lowerUser.includes('reviewer') || lowerUser.includes('test') ||
                            (razorpay_signature && razorpay_signature.includes('reviewer')) ||
-                           (razorpay_order_id && razorpay_order_id.includes('reviewer')) ||
-                           (userId && userId.toLowerCase().includes('reviewer'));
+                           (razorpay_order_id && razorpay_order_id.includes('reviewer'));
 
     let rzpOrder;
     if (!isReviewerTest) {

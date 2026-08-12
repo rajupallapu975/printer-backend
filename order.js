@@ -343,10 +343,14 @@ async function syncOrderToAdmin(orderId, watermarkedResults = null) {
     
     // 🛡️ DEDICATED TESTER STORE ISOLATION:
     // Route any reviewer/tester order exclusively to 'reviewer_shop_store' so real shops are never touched.
-    const isReviewerTest = (orderDocData.userEmail && orderDocData.userEmail.toLowerCase().includes('reviewer')) ||
-                           (orderDocData.customerName && orderDocData.customerName.toLowerCase().includes('reviewer')) ||
-                           (orderDocData.userId && orderDocData.userId.toLowerCase().includes('reviewer')) ||
-                           (orderDocData.customId && orderDocData.customId.toLowerCase().includes('reviewer')) ||
+    const lowerEmail = (orderDocData.userEmail || '').toLowerCase();
+    const lowerName = (orderDocData.customerName || '').toLowerCase();
+    const lowerCustom = (orderDocData.customId || '').toLowerCase();
+    const lowerUser = (orderDocData.userId || '').toLowerCase();
+    const isReviewerTest = lowerEmail.includes('reviewer') || lowerEmail.includes('test') || lowerEmail.includes('tester') || lowerEmail.includes('demo') ||
+                           lowerName.includes('reviewer') || lowerName.includes('tester') || lowerName.includes('test') ||
+                           lowerCustom.includes('reviewer') || lowerCustom.includes('test') ||
+                           lowerUser.includes('reviewer') || lowerUser.includes('test') ||
                            (orderId && orderId.toLowerCase().includes('reviewer'));
 
     if (isReviewerTest && (!shopId || shopId === 'default')) {
