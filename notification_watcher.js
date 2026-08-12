@@ -155,13 +155,17 @@ function watchShopOrdersForDb(dbInstance, dbName) {
                 if (change.type === "added" || (change.type === "modified" && change.doc.data().mirroredToAdmin === true)) {
                     const data = change.doc.data();
                     
+                    // 🛡️ Test Order Notification Isolation:
+                    const isTestOrder = data.orderType === 'test' || data.environment === 'test' || data.shopId === 'reviewer_shop_store';
+                    const targetShopId = isTestOrder ? 'reviewer_shop_store' : data.shopId;
+
                     // Prevent duplicate alerts (Use a 60-second freshness window for file uploads)
                     const now = Date.now();
                     const orderTime = data.createdAt ? data.createdAt.toMillis() : now;
                     if (now - orderTime > 60000) return; // Skip older orders
 
-                    console.log(`📦 New Shop Order: ${data.shopId} - Ticket ${data.orderCode} [${dbName}]`);
-                    await sendShopkeeperOrderAlert(data.shopId);
+                    console.log(`📦 New Shop Order: ${targetShopId} - Ticket ${data.orderCode} [${dbName}] (IsTest: ${isTestOrder})`);
+                    await sendShopkeeperOrderAlert(targetShopId);
                 }
             });
         }, (err) => console.error(`❌ [${dbName}] Shop Orders Listener Error:`, err.message));
