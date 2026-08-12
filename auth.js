@@ -45,4 +45,61 @@ function requireAdminKey(req, res, next) {
   next();
 }
 
-module.exports = { requireAdminKey };
+/**
+ * Optional Firebase Token Verification
+ * Parses Bearer token if present without throwing 401 if missing.
+ */
+async function optionalFirebaseToken(req, res, next) {
+  req.user = null;
+  req.isReviewer = false;
+
+  const authHeader = req.headers["authorization"] || req.headers["Authorization"];
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return next();
+  }
+
+  const token = authHeader.split("Bearer ")[1].trim();
+  if (!token) return next();
+
+  try {
+    const { admin } = require("./firebase");
+    const decodedToken = await admin.auth().verifyIdToken(token);
+    req.user = decodedToken;
+    req.isReviewer = decodedToken.email && decodedToken.email.toLowerCase() === "reviewer@zikrint.app";
+    console.log(`🔐 Token verified for user: ${decodedToken.email || decodedToken.uid} (Reviewer: ${req.isReviewer})`);
+  } catch (err) {
+    console.warn(`⚠️ Optional Firebase Token verification failed: ${err.message}`);
+  }
+  next();
+}
+
+/**
+ * Strict Firebase Token Verification
+ * Requires valid Bearer ID token.
+ */
+async function verifyFirebaseToken(req, res, next) {
+  const authHeader = req.headers["authorization"] || req.headers["Authorization"];
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return res.status(401).json({ success: false, error: "Unauthorized: Missing Authorization Bearer token" });
+  }
+
+  const token = authHeader.split("Bearer ")[1].trim();
+  if (!token) {
+    return res.status(401).json({ success: false, error: "Unauthorized: Empty token" });
+  }
+
+  try {
+    const { admin } = require("./firebase");
+    const decodedToken = await admin.auth().verifyIdToken(token);
+    req.user = decodedToken;
+    req.isReviewer = decodedToken.email && decodedToken.email.toLowerCase() === "reviewer@zikrint.app";
+    console.log(`🔐 Token verified for user: ${decodedToken.email || decodedToken.uid} (Reviewer: ${req.isReviewer})`);
+    next();
+  } catch (err) {
+    console.warn(`❌ Firebase Token verification error: ${err.message}`);
+    return res.status(401).json({ success: false, error: `Unauthorized: Invalid or expired token (${err.message})` });
+  }
+}
+
+module.exports = { requireAdminKey, verifyFirebaseToken, optionalFirebaseToken };
+

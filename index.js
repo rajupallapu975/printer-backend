@@ -19,7 +19,7 @@ const { performCleanup, cleanupOrder, deleteOrderFilesFromCloudinary } = require
 const { createOrder, syncOrderToAdmin, generateUniquePickupCode } = require("./order");
 const { applyWatermark } = require("./watermark_service");
 const { generateCoverPage } = require("./cover_page_service");
-const { requireAdminKey } = require("./auth");
+const { requireAdminKey, verifyFirebaseToken, optionalFirebaseToken } = require("./auth");
 require("./notification_watcher"); // 🚀 Start background listeners
 // ============================================================================
 // EXPRESS APP SETUP
@@ -93,11 +93,11 @@ app.post("/auth-config", requireAdminKey, async (req, res) => {
 // ============================================================================
 // ENDPOINT: FETCH LIVE XEROX SHOPS (From Admin Firebase)
 // ============================================================================
-app.get("/get-xerox-shops", async (req, res, next) => {
+app.get("/get-xerox-shops", optionalFirebaseToken, async (req, res, next) => {
   try {
     const { dbAdmin } = require("./firebase");
 
-    console.log("🏪 Fetching shops from Admin Database...");
+    console.log(`🏪 Fetching shops from Admin Database... (Is Reviewer: ${!!req.isReviewer})`);
 
     const snapshot = await dbAdmin.collection("shops").get();
 
@@ -105,8 +105,13 @@ app.get("/get-xerox-shops", async (req, res, next) => {
       return res.json({ success: true, shops: [] });
     }
 
-    const shops = await Promise.all(
+    const shops = (await Promise.all(
       snapshot.docs.map(async (doc) => {
+        // 🛡️ Server-controlled visibility: Hide test shop from non-reviewer users
+        if ((doc.id === 'reviewer_shop_store' || doc.data().isTestShop === true) && !req.isReviewer) {
+          return null;
+        }
+
         const printersSnapshot = await doc.ref
           .collection("printers")
           .where("isOnline", "==", true)
@@ -118,7 +123,7 @@ app.get("/get-xerox-shops", async (req, res, next) => {
           activePrinters: printersSnapshot.size,
         };
       })
-    );
+    )).filter(s => s !== null);
 
     res.json({
       success: true,
@@ -155,8 +160,65 @@ app.post("/create-razorpay-order", async (req, res, next) => {
   }
 });
 // ============================================================================
-// ENDPOINT: VERIFY PAYMENT & CREATE DB ORDER
+// ENDPOINT: DEDICATED TEST ORDER CREATION (Server-Verified Reviewer Only)
 // ============================================================================
+app.post("/api/v1/test/create-order", verifyFirebaseToken, async (req, res, next) => {
+  try {
+    if (!req.isReviewer) {
+      return res.status(403).json({ success: false, error: "Forbidden: Test order creation is restricted to verified reviewer identity" });
+    }
+
+    const { printSettings, amount, totalPages, customId, customerName } = req.body;
+    if (!printSettings) {
+      return res.status(400).json({ success: false, error: "printSettings required" });
+    }
+
+    const testPrintSettings = {
+      ...printSettings,
+      shopId: 'reviewer_shop_store',
+      shopName: 'Zikrint Reviewer Test Shop',
+    };
+
+    console.log(`\n🧪 [Reviewer Test Order Creation]`);
+    console.log(`   - Verified Reviewer User: ${req.user.email}`);
+    console.log(`   - Target Shop: reviewer_shop_store`);
+
+    const result = await createOrder(
+      testPrintSettings,
+      null,
+      amount,
+      totalPages,
+      'xeroxShop',
+      req.user.uid,
+      customId || 'reviewer_test_order',
+      req.user.email,
+      customerName || 'Reviewer User'
+    );
+
+    await result.db.collection("xerox_orders").doc(result.orderId).update({
+      orderType: 'test',
+      environment: 'test',
+      paymentStatus: 'PAID',
+      status: 'ACTIVE',
+      orderStatus: 'not printed yet',
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    res.json({
+      success: true,
+      orderId: result.orderId,
+      pickupCode: result.pickupCode,
+      orderCode: result.orderCode,
+      xeroxId: 'reviewer_shop_store',
+      shopId: 'reviewer_shop_store',
+      amount: result.amount,
+      projectId: result.projectId
+    });
+  } catch (error) {
+    console.error("❌ Test order creation error:", error);
+    next(error);
+  }
+});
 app.post("/verify-payment", async (req, res, next) => {
   try {
     const {
@@ -713,6 +775,29 @@ app.post("/mark-delivered", async (req, res, next) => {
                  const sData = shopDoc.data();
                  
                  if (aData.isPicked || aData.status === 'completed') return;
+
+                 const isTestShopOrder = shopId === 'reviewer_shop_store' ||
+                                         aData.shopId === 'reviewer_shop_store' ||
+                                         aData.orderType === 'test' ||
+                                         aData.environment === 'test';
+
+                 if (isTestShopOrder) {
+                   console.log(`🧪 [Test Financial Isolation] Processing delivery for test order ${orderId}. Bypassing real vendor wallet credit.`);
+                   transaction.set(shopRef.collection("history").doc(orderId), {
+                     orderId: orderId,
+                     orderCode: aData.orderCode || orderId,
+                     customerName: aData.customerName || 'Reviewer Test User',
+                     amount: Number(aData.amount || 0),
+                     printingCost: 0.0,
+                     platformCommission: 0.0,
+                     bwPages: Number(aData.bwPages || 0),
+                     colorPages: Number(aData.colorPages || 0),
+                     isDuplex: aData.isDuplex === true,
+                     collectedAt: admin.firestore.FieldValue.serverTimestamp(),
+                     isTest: true
+                   });
+                   return;
+                 }
 
                  const totalAmount = Number(aData.amount || 0);
                  const coverPageCharge = Number(aData.coverPageCharge || 0);
@@ -1333,7 +1418,7 @@ app.delete("/api/services/:id", async (req, res, next) => {
 // ============================================================================
 // ENDPOINTS: SHOP AVAILABILITY & CONFIGURATION APIs (Used by Customer/Captain Apps)
 // ============================================================================
-app.get("/api/services/:id/shops", async (req, res, next) => {
+app.get("/api/services/:id/shops", optionalFirebaseToken, async (req, res, next) => {
   try {
     const serviceId = req.params.id;
     const paperSize = req.query.paperSize;
@@ -1385,6 +1470,11 @@ app.get("/api/services/:id/shops", async (req, res, next) => {
       const isBlocked = shopData.isBlocked === true;
       const isAcceptingOrders = shopData.isAcceptingOrders !== false;
       const isOpen = shopData.isOpen === true;
+
+      if ((doc.id === 'reviewer_shop_store' || shopData.isTestShop === true) && !req.isReviewer) {
+        console.log(` ❌ Hiding Test Shop [${shopName}] from non-reviewer user.`);
+        continue;
+      }
 
       if (shopData.isActive === false) {
         console.log(` ❌ Shop [${shopName}] is deactivated.`);
