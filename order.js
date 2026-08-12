@@ -440,6 +440,7 @@ async function syncOrderToAdmin(orderId, watermarkedResults = null) {
       viewUrls: viewUrls,
       fileUrl: signedUrls.length > 0 ? signedUrls[0] : null,
       orderId: orderId,
+      customId: orderDocData.customId || null,
       orderCode: orderCode, 
       xeroxId: shopId, 
       pickupCode: orderCode, 
