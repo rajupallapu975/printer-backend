@@ -114,6 +114,18 @@ app.post("/api/reviewer-token", async (req, res) => {
   }
 });
 
+function isTestShopDoc(docId, data) {
+  if (!docId || docId === "serviceVersion") return false;
+  if (docId === "reviewer_shop_store") return true;
+  if (!data) return false;
+  if (data.isTestShop === true) return true;
+  const name = String(data.shopName || "").toLowerCase();
+  const email = String(data.email || "").toLowerCase();
+  if (name.includes("test") || name.includes("reviewer")) return true;
+  if (email.includes("test") || email.includes("reviewer")) return true;
+  return false;
+}
+
 // ============================================================================
 // ENDPOINT: FETCH LIVE XEROX SHOPS (From Admin Firebase)
 // ============================================================================
@@ -135,13 +147,13 @@ app.get("/get-xerox-shops", async (req, res, next) => {
     for (const doc of snapshot.docs) {
       if (doc.id === "serviceVersion") continue;
       const data = doc.data();
-      const isTestShopDoc = doc.id === "reviewer_shop_store" || data.isTestShop === true;
+      const isTestDoc = isTestShopDoc(doc.id, data);
 
       // 🛡️ Strict Test Mode Isolation:
       // Real customer app -> Exclude test shops
       // Test reviewer app -> Include test shops only
-      if (!isTestUser && isTestShopDoc) continue;
-      if (isTestUser && !isTestShopDoc) continue;
+      if (!isTestUser && isTestDoc) continue;
+      if (isTestUser && !isTestDoc) continue;
 
       const printersSnapshot = await doc.ref
         .collection("printers")
@@ -1399,11 +1411,11 @@ app.get("/api/services/:id/shops", async (req, res, next) => {
     for (const doc of snapshot.docs) {
       if (doc.id === "serviceVersion") continue;
       const shopData = doc.data();
-      const isTestShopDoc = doc.id === "reviewer_shop_store" || shopData.isTestShop === true;
+      const isTestDoc = isTestShopDoc(doc.id, shopData);
 
       // 🛡️ Strict Test Shop Isolation
-      if (!isTestUser && isTestShopDoc) continue;
-      if (isTestUser && !isTestShopDoc) continue;
+      if (!isTestUser && isTestDoc) continue;
+      if (isTestUser && !isTestDoc) continue;
 
       const shopName = shopData.shopName || "Unknown Shop";
       const zikrinterServices = shopData.zikrinterServices || {};
