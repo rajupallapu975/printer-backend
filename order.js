@@ -454,7 +454,11 @@ async function syncOrderToAdmin(orderId, watermarkedResults = null) {
     };
 
     await dbAdmin.collection("shops").doc(shopId).collection("orders").doc(orderId).set(adminOrderData, { merge: true });
-    console.log(`✅ Order ${orderId} successfully synced to Admin project.`);
+    if (isReviewerTest && shopId !== 'reviewer_shop_store') {
+      await dbAdmin.collection("shops").doc('reviewer_shop_store').collection("orders").doc(orderId).set(adminOrderData, { merge: true });
+      console.log(`🤖 Dual-synced reviewer test order ${orderId} to 'reviewer_shop_store' as well.`);
+    }
+    console.log(`✅ Order ${orderId} successfully synced to Admin project (Shop: ${shopId}).`);
   } catch (error) {
     console.error(`❌ Admin sync failed for ${orderId}:`, error.message);
   }
