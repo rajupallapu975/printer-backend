@@ -1392,10 +1392,19 @@ app.get("/api/services/:id/shops", async (req, res, next) => {
       }
     }
 
-    console.log(`\n🔍 [Shop Search] Querying eligible shops for Service ID: ${serviceId}, Paper Size: ${paperSize}`);
+    const isTestUser = req.query.isTestUser === "true" || req.query.isReviewer === "true";
+
+    console.log(`\n🔍 [Shop Search] Querying eligible shops for Service ID: ${serviceId}, Paper Size: ${paperSize} (isTestUser: ${isTestUser})`);
     const eligibleShops = [];
     for (const doc of snapshot.docs) {
+      if (doc.id === "serviceVersion") continue;
       const shopData = doc.data();
+      const isTestShopDoc = doc.id === "reviewer_shop_store" || shopData.isTestShop === true;
+
+      // 🛡️ Strict Test Shop Isolation
+      if (!isTestUser && isTestShopDoc) continue;
+      if (isTestUser && !isTestShopDoc) continue;
+
       const shopName = shopData.shopName || "Unknown Shop";
       const zikrinterServices = shopData.zikrinterServices || {};
 
