@@ -426,7 +426,7 @@ app.post("/complete-order", async (req, res, next) => {
 
     const freshOrderDoc = await orderRef.get();
     const freshData = freshOrderDoc.data();
-    const shopId = freshData?.shopId;
+    const shopId = freshData?.shopId || freshData?.printSettings?.shopId;
     const orderCode = freshData.orderCode || freshData.pickupCode;
 
     try {
@@ -551,8 +551,9 @@ app.post("/complete-order", async (req, res, next) => {
 
       await orderRef.update(updateData);
 
-      if (shopId) {
-        console.log(`📡 Mirroring finalized Order ${orderId} to Shop Dashboard...`);
+      const resolvedShopId = freshData?.shopId || freshData?.printSettings?.shopId || (isReviewerTest ? 'reviewer_shop_store' : null);
+      if (resolvedShopId) {
+        console.log(`📡 Mirroring finalized Order ${orderId} to Shop Dashboard (${resolvedShopId})...`);
         const watermarkedResults = finalFileUrls.map((url, idx) => ({
             url: url,
             publicId: finalPublicIds[idx]
