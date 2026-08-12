@@ -305,34 +305,6 @@ app.post("/verify-payment", async (req, res, next) => {
       status: "ACTIVE",
     };
     await result.db.collection(mainCollection).doc(result.orderId).update(updateData);
-
-    // 🤖 Reviewer Test Auto-Progression (Placed -> Printing @ 5s -> Ready @ 10s)
-    if (isReviewerTest) {
-      const targetDocId = result.orderId;
-      setTimeout(async () => {
-        try {
-          await result.db.collection(mainCollection).doc(targetDocId).update({
-            orderStatus: 'printing',
-            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-          });
-          console.log(`🤖 [Reviewer Test] Auto-advanced order ${targetDocId} to 'printing'`);
-        } catch (err) {
-          console.error(`⚠️ Reviewer auto-advance error: ${err}`);
-        }
-      }, 5000);
-
-      setTimeout(async () => {
-        try {
-          await result.db.collection(mainCollection).doc(targetDocId).update({
-            orderStatus: 'printing completed',
-            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-          });
-          console.log(`🤖 [Reviewer Test] Auto-advanced order ${targetDocId} to 'printing completed'`);
-        } catch (err) {
-          console.error(`⚠️ Reviewer auto-advance error: ${err}`);
-        }
-      }, 10000);
-    }
     // 🛡️ Admin sync removed from here to prevent incomplete orders from showing up.
     // It is now moved to /complete-order which is called after file upload success.
     // Get final order data to return
@@ -459,7 +431,9 @@ app.post("/complete-order", async (req, res, next) => {
       const files = freshData.printSettings?.files || [];
       const totalPrintablePages = files.reduce((sum, f) => sum + (Number(f.pageCount) || 1) * (Number(f.copies) || 1), 0);
       
-      const generateCoverPageEnabled = totalPrintablePages > 5;
+      const isPassportPhotoService = (freshData.serviceName || '').toLowerCase().includes('passport') ||
+                                     (freshData.serviceId || '').includes('yPiaqNqbvhABcunanu5X');
+      const generateCoverPageEnabled = !isPassportPhotoService && totalPrintablePages > 5;
       
       let finalFileUrls = [];
       let finalPublicIds = [];
@@ -467,7 +441,12 @@ app.post("/complete-order", async (req, res, next) => {
       let coverPagePublicId = null;
       let printSequence = [];
 
-      if (generateCoverPageEnabled) {
+      if (isPassportPhotoService) {
+        console.log(`📷 Passport Photo Order ${orderId} detected. Bypassing watermarking and cover page...`);
+        finalFileUrls = [...fileUrls];
+        finalPublicIds = [...incomingPublicIds];
+        printSequence = files.map((f, i) => `file${i+1}`);
+      } else if (generateCoverPageEnabled) {
         console.log(`📄 Generating Cover Page for Order ${orderId} (Total pages: ${totalPrintablePages} > 5)...`);
         
         const formattedFiles = files.map((f, i) => ({
@@ -675,7 +654,7 @@ app.post("/mark-printed", async (req, res, next) => {
                                (orderData.customId && orderData.customId.toLowerCase().includes('reviewer')) ||
                                (orderId && orderId.toLowerCase().includes('reviewer'));
 
-        const resolvedShopId = isReviewerTest ? 'reviewer_shop_store' : (shopId || orderData.shopId);
+        const resolvedShopId = shopId || orderData.shopId || (isReviewerTest ? 'reviewer_shop_store' : null);
         if (resolvedShopId) {
           await dbAdmin.collection("shops").doc(resolvedShopId).collection("orders").doc(orderId).update({
             orderStatus: 'printing completed',

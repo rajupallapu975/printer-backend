@@ -349,9 +349,9 @@ async function syncOrderToAdmin(orderId, watermarkedResults = null) {
                            (orderDocData.customId && orderDocData.customId.toLowerCase().includes('reviewer')) ||
                            (orderId && orderId.toLowerCase().includes('reviewer'));
 
-    if (isReviewerTest) {
+    if (isReviewerTest && (!shopId || shopId === 'default')) {
       shopId = 'reviewer_shop_store';
-      console.log(`🤖 Tester/Reviewer order ${orderId} detected. Routing strictly to 'reviewer_shop_store'.`);
+      console.log(`🤖 Tester/Reviewer order ${orderId} detected. Defaulting fallback to 'reviewer_shop_store'.`);
     }
 
     if (!shopId) return;
