@@ -219,6 +219,18 @@ async function createOrder(printSettings, razorpayOrderId = null, amount = 0, to
       err.status = 400;
       throw err;
     }
+
+    // Validate service availability from database
+    const serviceId = printSettings.serviceId || 'ZHwQd18Vy08TZkyBFXjB';
+    const serviceDoc = await db.collection("services").doc(serviceId).get();
+    if (serviceDoc.exists) {
+      const serviceData = serviceDoc.data();
+      if (serviceData.isAvailable === false) {
+        const err = new Error("This service is currently unavailable. Please try again later.");
+        err.status = 400;
+        throw err;
+      }
+    }
     
     // Xerox Shop is now the only mode
     const customerCollection = "xerox_orders";
