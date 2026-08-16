@@ -250,8 +250,6 @@ async function createOrder(printSettings, razorpayOrderId = null, amount = 0, to
     
     const xeroxCode = await generateUniquePickupCode();
     const orderId = xeroxCode;
-    
-    const serviceId = printSettings.serviceId || 'ZHwQd18Vy08TZkyBFXjB';
     const serviceName = printSettings.serviceName || 'Documents (Xerox)';
 
     const orderData = {
