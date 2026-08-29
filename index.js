@@ -715,6 +715,52 @@ app.post("/mark-printing", async (req, res, next) => {
     console.error("❌ mark-printing error:", error);
     next(error);
   }
+// ============================================================================
+// ENDPOINT: TOGGLE FILE STATUS (Per-File Checkmark Persistence)
+// ============================================================================
+app.post("/api/toggle-file-status", async (req, res, next) => {
+  try {
+    const { orderId, shopId, fileIndex, isCompleted } = req.body;
+    if (!orderId || fileIndex === undefined) {
+      return res.status(400).json({ error: "orderId and fileIndex required" });
+    }
+
+    const idx = Number(fileIndex);
+    const updateVal = isCompleted
+      ? admin.firestore.FieldValue.arrayUnion(idx)
+      : admin.firestore.FieldValue.arrayRemove(idx);
+
+    // 1. Update Customer DB
+    try {
+      const { findCustomerOrderByIdOrCode } = require("./firebase");
+      const { doc: orderDoc } = await findCustomerOrderByIdOrCode(orderId);
+      if (orderDoc && orderDoc.exists) {
+        await orderDoc.ref.update({
+          completedFileIndices: updateVal,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      }
+    } catch (e) {
+      console.warn("⚠️ Customer DB toggle-file-status error:", e.message);
+    }
+
+    // 2. Update Admin DB
+    if (shopId) {
+      try {
+        await dbAdmin.collection("shops").doc(shopId).collection("orders").doc(orderId).update({
+          completedFileIndices: updateVal,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }).catch(() => null);
+      } catch (e) {
+        console.warn("⚠️ Admin DB toggle-file-status error:", e.message);
+      }
+    }
+
+    res.json({ success: true, message: `File ${idx} status updated.` });
+  } catch (err) {
+    console.error("❌ toggle-file-status error:", err.message);
+    next(err);
+  }
 });
 
 // ============================================================================
