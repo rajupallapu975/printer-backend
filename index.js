@@ -1502,6 +1502,29 @@ app.delete("/api/services/:id", async (req, res, next) => {
 // ============================================================================
 // ENDPOINTS: SHOP AVAILABILITY & CONFIGURATION APIs (Used by Customer/Captain Apps)
 // ============================================================================
+app.get("/get-xerox-shops", async (req, res, next) => {
+  try {
+    const isTestUser = req.query.isTestUser === "true" || req.query.isReviewer === "true";
+    const snapshot = await dbAdmin.collection("shops").get();
+    const shops = [];
+
+    snapshot.forEach(doc => {
+      if (doc.id === "serviceVersion") return;
+      const data = doc.data();
+      const isTestDoc = isTestShopDoc(doc.id, data);
+
+      if (!isTestUser && isTestDoc) return;
+      if (isTestUser && !isTestDoc) return;
+
+      shops.push({ id: doc.id, ...data });
+    });
+
+    res.json({ success: true, shops });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get("/api/services/:id/shops", async (req, res, next) => {
   try {
     const serviceId = req.params.id;
