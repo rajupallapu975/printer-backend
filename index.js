@@ -2038,17 +2038,6 @@ app.post("/api/pricing/calculate", async (req, res, next) => {
 });
 
 // ============================================================================
-// 404 HANDLER (MUST BE LAST)
-// ============================================================================
-app.use((req, res) => {
-  console.log(`⚠️ 404 NOT FOUND: ${req.method} ${req.url}`);
-  res.status(404).json({
-    success: false,
-    error: `Route ${req.method} ${req.url} not found on this server.`
-  });
-});
-
-// ============================================================================
 // ENDPOINTS: USER NOTIFICATIONS & ORDER HISTORY API (Cloud Sync & Fallback)
 // ============================================================================
 app.get("/api/user/notifications", async (req, res, next) => {
@@ -2124,6 +2113,17 @@ app.get("/api/user/order-history", async (req, res, next) => {
   } catch (error) {
     next(error);
   }
+});
+
+// ============================================================================
+// 404 HANDLER (MUST BE LAST)
+// ============================================================================
+app.use((req, res) => {
+  console.log(`⚠️ 404 NOT FOUND: ${req.method} ${req.url}`);
+  res.status(404).json({
+    success: false,
+    error: `Route ${req.method} ${req.url} not found on this server.`
+  });
 });
 
 // ============================================================================
