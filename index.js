@@ -589,6 +589,28 @@ app.post("/complete-order", async (req, res, next) => {
         await syncOrderToAdmin(orderId, watermarkedResults);
       }
 
+      // 💾 Save "Order Placed" notification in user's cloud history
+      const orderUserId = freshData?.userId || freshData?.userEmail;
+      if (orderUserId) {
+        try {
+          const rawCustomId = freshData?.customId || '';
+          const orderNumber = rawCustomId.replace(/^order_/i, '').trim();
+          const orderLabel = orderNumber ? `Order #${orderNumber}` : `Order #${orderCode || orderId}`;
+          const notifId = `notif_placed_${orderId}_${Date.now()}`;
+          await dbCustomer.collection("users").doc(orderUserId).collection("notifications").doc(notifId).set({
+            title: `${orderLabel} — Order Placed 📄`,
+            body: `Your printing order for ${orderLabel} has been placed and sent to the shop.`,
+            time: admin.firestore.FieldValue.serverTimestamp(),
+            type: 'info',
+            isRead: false,
+            orderId: orderId,
+          });
+          console.log(`💾 Saved "Order Placed" notification in Firestore for user: ${orderUserId}`);
+        } catch (notifErr) {
+          console.warn(`⚠️ Failed to save placed notification to Firestore: ${notifErr.message}`);
+        }
+      }
+
       } catch (err) {
         console.error("❌ Processing Failure (HARD PURGE):", err.message);
         
@@ -987,6 +1009,45 @@ app.post("/mark-delivered", async (req, res, next) => {
              status: 'completed',
              purgedAt: admin.firestore.FieldValue.serverTimestamp()
          }).catch(() => null);
+
+         // 💾 2.8️⃣ SAVE "ORDER COMPLETED" NOTIFICATION & ORDER HISTORY IN USER'S CLOUD RECORD
+         const userId = foundData.userId || foundData.userEmail;
+         if (userId) {
+           try {
+             const rawCustomId = foundData.customId || '';
+             const orderNumber = rawCustomId.replace(/^order_/i, '').trim();
+             const orderLabel = orderNumber ? `Order #${orderNumber}` : `Order #${foundData.orderCode || foundData.pickupCode || orderId}`;
+             const notifId = `notif_completed_${orderId}_${Date.now()}`;
+             
+             // 1. Save Notification
+             await dbCustomer.collection("users").doc(userId).collection("notifications").doc(notifId).set({
+               title: `${orderLabel} — Order Completed ✅`,
+               body: `Your prints for ${orderLabel} have been collected. Thank you for printing with us!`,
+               time: admin.firestore.FieldValue.serverTimestamp(),
+               type: 'success',
+               isRead: false,
+               orderId: orderId,
+             });
+             console.log(`💾 Saved completed order notification in Firestore for user: ${userId}`);
+
+             // 2. Archive to User's Permanent Order History
+             const historyPayload = {
+               ...foundData,
+               orderId: orderId,
+               status: 'completed',
+               orderStatus: 'completed',
+               isPicked: true,
+               orderDone: true,
+               filesDeleted: true,
+               fileUrls: [],
+               completedAt: admin.firestore.FieldValue.serverTimestamp(),
+             };
+             await dbCustomer.collection("users").doc(userId).collection("order_history").doc(orderId).set(historyPayload, { merge: true });
+             console.log(`📜 Archived order ${orderId} to users/${userId}/order_history in Firestore`);
+           } catch (e) {
+             console.warn(`⚠️ Failed to save completed notification / history to Firestore: ${e.message}`);
+           }
+         }
 
          // 3️⃣ DELETE CUSTOMER RECORD
          console.log(`🔥 Hard Deleting Customer Record for ${orderId} in ${foundCol}`);

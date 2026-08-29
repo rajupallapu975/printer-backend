@@ -338,6 +338,22 @@ async function sendUserCompletionAlert(data) {
 
         await admin.app('customer').messaging().send(message);
         console.log(`✅ Professional Alert sent to User ${data.userId} for Order ${orderId}`);
+
+        // 💾 Save "Ready for Pickup" notification in user's cloud history
+        try {
+            const notifId = `notif_ready_${orderId}_${Date.now()}`;
+            await dbCustomer.collection("users").doc(data.userId).collection("notifications").doc(notifId).set({
+                title: `${orderLabel} — Print Successful! 🎉`,
+                body: `Your prints for ${orderLabel} are ready! Please visit the shop to collect them.`,
+                time: admin.firestore.FieldValue.serverTimestamp(),
+                type: 'success',
+                isRead: false,
+                orderId: orderId,
+            });
+            console.log(`💾 Saved ready notification in Firestore for user: ${data.userId}`);
+        } catch (saveErr) {
+            console.warn(`⚠️ Failed to save ready notification to Firestore: ${saveErr.message}`);
+        }
     } catch (error) {
         console.error("❌ User Alert Error:", error.message);
     }
