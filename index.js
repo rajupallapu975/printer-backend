@@ -715,6 +715,8 @@ app.post("/mark-printing", async (req, res, next) => {
     console.error("❌ mark-printing error:", error);
     next(error);
   }
+});
+
 // ============================================================================
 // ENDPOINT: TOGGLE FILE STATUS (Per-File Checkmark Persistence)
 // ============================================================================
