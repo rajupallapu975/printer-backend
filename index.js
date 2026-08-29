@@ -656,6 +656,68 @@ app.post("/complete-order", async (req, res, next) => {
 });
 
 // ============================================================================
+// ENDPOINT: MARK AS PRINTING (Download/Print Triggered)
+// ============================================================================
+app.post("/mark-printing", async (req, res, next) => {
+  try {
+    const { orderId, shopId } = req.body;
+    if (!orderId) return res.status(400).json({ error: "orderId required" });
+
+    let customerDocUpdated = false;
+    let adminDocUpdated = false;
+
+    // 1. Update Customer DB
+    try {
+      const { findCustomerOrderByIdOrCode } = require("./firebase");
+      const { doc: orderDoc } = await findCustomerOrderByIdOrCode(orderId);
+
+      if (orderDoc && orderDoc.exists) {
+        const orderData = orderDoc.data();
+        await orderDoc.ref.update({
+          orderStatus: 'printing',
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        customerDocUpdated = true;
+        console.log(`🖨️ Customer DB orderStatus set to 'printing' for ${orderId}`);
+
+        const isReviewerTest = (orderData.userEmail && orderData.userEmail.toLowerCase().includes('reviewer')) ||
+                               (orderData.customerName && orderData.customerName.toLowerCase().includes('reviewer')) ||
+                               (orderData.userId && orderData.userId.toLowerCase().includes('reviewer')) ||
+                               (orderId && orderId.toLowerCase().includes('reviewer'));
+        const resolvedShopId = shopId || orderData.shopId || (isReviewerTest ? 'reviewer_shop_store' : null);
+        if (resolvedShopId) {
+          await dbAdmin.collection("shops").doc(resolvedShopId).collection("orders").doc(orderId).update({
+            orderStatus: 'printing',
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          }).catch(() => null);
+          adminDocUpdated = true;
+        }
+      }
+    } catch (err) {
+      console.warn("⚠️ Customer DB update error in /mark-printing:", err.message);
+    }
+
+    // 2. Direct Admin DB update
+    if (!adminDocUpdated && shopId) {
+      try {
+        await dbAdmin.collection("shops").doc(shopId).collection("orders").doc(orderId).update({
+          orderStatus: 'printing',
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }).catch(() => null);
+        adminDocUpdated = true;
+      } catch (err) {
+        console.warn("⚠️ Admin DB direct update error in /mark-printing:", err.message);
+      }
+    }
+
+    return res.json({ success: true, message: `Order ${orderId} status set to printing.` });
+  } catch (error) {
+    console.error("❌ mark-printing error:", error);
+    next(error);
+  }
+});
+
+// ============================================================================
 // ENDPOINT: MARK AS PRINTED (Cleanup)
 // ============================================================================
 app.post("/mark-printed", async (req, res, next) => {
