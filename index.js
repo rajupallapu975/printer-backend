@@ -119,10 +119,8 @@ function isTestShopDoc(docId, data) {
   if (docId === "reviewer_shop_store") return true;
   if (!data) return false;
   if (data.isTestShop === true) return true;
-  const name = String(data.shopName || "").toLowerCase();
   const email = String(data.email || "").toLowerCase();
-  if (name.includes("test") || name.includes("reviewer")) return true;
-  if (email.includes("test") || email.includes("reviewer")) return true;
+  if (email === "reviewer@zikrint.app") return true;
   return false;
 }
 
@@ -216,7 +214,8 @@ app.post("/verify-payment", async (req, res, next) => {
       amount,
       totalPages,
       customId,
-      customerName
+      customerName,
+      customerPhone
     } = req.body;
 
     console.log(`\n💳 [Verify Payment Step]`);
@@ -227,6 +226,7 @@ app.post("/verify-payment", async (req, res, next) => {
     console.log(`   - User ID: ${userId || 'guest_user'}`);
     console.log(`   - User Email: ${userEmail || 'N/A'}`);
     console.log(`   - Customer Name: ${customerName || 'N/A'}`);
+    console.log(`   - Customer Phone: ${customerPhone || 'N/A'}`);
     if (printSettings.files && Array.isArray(printSettings.files)) {
       console.log(`   - Files:`);
       printSettings.files.forEach(f => {
@@ -298,7 +298,8 @@ app.post("/verify-payment", async (req, res, next) => {
       userId || 'guest_user',
       customId,
       userEmail,
-      customerName
+      customerName,
+      customerPhone
     );
     const mainCollection = "xerox_orders";
     // Update with payment details in Customer DB

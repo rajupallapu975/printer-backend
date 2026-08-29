@@ -212,7 +212,7 @@ async function generateUniquePickupCode() {
 /**
  * CREATE ORDER
  */
-async function createOrder(printSettings, razorpayOrderId = null, amount = 0, totalPages = 0, printMode = 'xeroxShop', userId = 'guest_user', customId = null, userEmail = null, customerName = null) {
+async function createOrder(printSettings, razorpayOrderId = null, amount = 0, totalPages = 0, printMode = 'xeroxShop', userId = 'guest_user', customId = null, userEmail = null, customerName = null, customerPhone = null) {
   try {
     if (!printSettings || typeof printSettings !== "object") {
       const err = new Error("Invalid printSettings");
@@ -250,13 +250,29 @@ async function createOrder(printSettings, razorpayOrderId = null, amount = 0, to
     
     const xeroxCode = await generateUniquePickupCode();
     const orderId = xeroxCode;
+    
     const serviceName = printSettings.serviceName || 'Documents (Xerox)';
+
+    // Retrieve phone number from users collection if not passed
+    let phoneFromDb = null;
+    if (userId && userId !== 'guest_user') {
+      try {
+        const userDoc = await db.collection("users").doc(userId).get();
+        if (userDoc.exists) {
+          phoneFromDb = userDoc.data().phoneNumber || userDoc.data().phone || null;
+        }
+      } catch (err) {
+        console.warn(`⚠️ Failed to fetch user profile phone: ${err.message}`);
+      }
+    }
+    const finalCustomerPhone = customerPhone || phoneFromDb || null;
 
     const orderData = {
       orderId,
       userId,
       userEmail: userEmail || userId, // Display email in Admin App
       customerName: customerName || userEmail || userId || 'Guest User',
+      customerPhone: finalCustomerPhone,
       printSettings,
       
       // Dynamic Pricing & Splitting Metadata
@@ -424,6 +440,7 @@ async function syncOrderToAdmin(orderId, watermarkedResults = null) {
     const adminOrderData = {
       id: orderId,
       customerName: orderDocData.customerName || orderDocData.userEmail || userId || 'Guest',
+      customerPhone: orderDocData.customerPhone || null,
       fileName: displayFileNames[0],
       bwPages: printSettings.files ? printSettings.files.reduce((sum, f) => sum + (f.color === 'BW' ? (f.pageCount || 1) * (f.copies || 1) : 0), 0) : 0,
       colorPages: printSettings.files ? printSettings.files.reduce((sum, f) => sum + (f.color === 'COLOR' ? (f.pageCount || 1) * (f.copies || 1) : 0), 0) : 0,
