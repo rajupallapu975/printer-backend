@@ -114,6 +114,33 @@ app.post("/api/reviewer-token", async (req, res) => {
   }
 });
 
+// ============================================================================
+// ENDPOINT: TOGGLE SHOP ONLINE / OFFLINE STATUS
+// ============================================================================
+app.post("/api/toggle-shop-status", async (req, res) => {
+  try {
+    const { shopId, isOpen, sessionId } = req.body;
+    if (!shopId) {
+      return res.status(400).json({ success: false, error: "shopId is required" });
+    }
+    const { dbAdmin } = require("./firebase");
+    const updateData = {
+      isOpen: !!isOpen,
+      isCurrentlyOpen: !!isOpen,
+      lastActive: new Date().toISOString(),
+    };
+    if (sessionId) {
+      updateData.activeSessionId = sessionId;
+    }
+    await dbAdmin.collection("shops").doc(shopId).set(updateData, { merge: true });
+    console.log(`🏪 Shop [${shopId}] status toggled to: ${isOpen ? 'ONLINE' : 'OFFLINE'}`);
+    return res.json({ success: true, shopId, isOpen: !!isOpen });
+  } catch (err) {
+    console.error("❌ Toggle Shop Status Error:", err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 function isTestShopDoc(docId, data) {
   if (!docId || docId === "serviceVersion") return false;
   if (docId === "reviewer_shop_store") return true;
