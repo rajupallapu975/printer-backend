@@ -2049,6 +2049,84 @@ app.use((req, res) => {
 });
 
 // ============================================================================
+// ENDPOINTS: USER NOTIFICATIONS & ORDER HISTORY API (Cloud Sync & Fallback)
+// ============================================================================
+app.get("/api/user/notifications", async (req, res, next) => {
+  try {
+    const userId = req.query.userId;
+    if (!userId) return res.status(400).json({ success: false, error: "userId is required" });
+
+    const snapshot = await dbCustomer.collection("users").doc(userId).collection("notifications").orderBy("time", "desc").limit(50).get();
+    const notifications = snapshot.docs.map(doc => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        title: data.title || "",
+        body: data.body || "",
+        time: data.time && data.time.toDate ? data.time.toDate().toISOString() : (data.time || new Date().toISOString()),
+        type: data.type || "info",
+        isRead: data.isRead === true,
+        orderId: data.orderId || null,
+      };
+    });
+
+    res.json({ success: true, notifications });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/user/notifications/mark-read", async (req, res, next) => {
+  try {
+    const { userId } = req.body;
+    if (!userId) return res.status(400).json({ success: false, error: "userId is required" });
+
+    const snapshot = await dbCustomer.collection("users").doc(userId).collection("notifications").where("isRead", "==", false).get();
+    const batch = dbCustomer.batch();
+    snapshot.docs.forEach(doc => {
+      batch.update(doc.reference, { isRead: true });
+    });
+    await batch.commit();
+
+    res.json({ success: true, message: "Marked all as read" });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/user/notifications/clear", async (req, res, next) => {
+  try {
+    const { userId } = req.body;
+    if (!userId) return res.status(400).json({ success: false, error: "userId is required" });
+
+    const snapshot = await dbCustomer.collection("users").doc(userId).collection("notifications").get();
+    const batch = dbCustomer.batch();
+    snapshot.docs.forEach(doc => {
+      batch.delete(doc.reference);
+    });
+    await batch.commit();
+
+    res.json({ success: true, message: "Cleared all notifications" });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/user/order-history", async (req, res, next) => {
+  try {
+    const userId = req.query.userId;
+    if (!userId) return res.status(400).json({ success: false, error: "userId is required" });
+
+    const snapshot = await dbCustomer.collection("users").doc(userId).collection("order_history").orderBy("createdAt", "desc").limit(50).get();
+    const orders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+    res.json({ success: true, orders });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ============================================================================
 // ERROR HANDLER
 // ============================================================================
 app.use((err, req, res, next) => {
