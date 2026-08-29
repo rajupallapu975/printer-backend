@@ -1797,28 +1797,35 @@ app.post("/api/shop/pricing", async (req, res, next) => {
         const bwSingle = Number(config.bw?.singleSidePrice) || 0.0;
         const bwDouble = Number(config.bw?.doubleSidePrice) || 0.0;
         const bwBulk = Number(config.bw?.bulkPrintingPrice) || 0.0;
+        const bwDoubleBulk = Number(config.bw?.doubleBulkPrintingPrice) || Number(config.bw?.double_bulkPrintingPrice) || 0.0;
 
         const colorSingle = Number(config.color?.singleSidePrice) || 0.0;
         const colorDouble = Number(config.color?.doubleSidePrice) || 0.0;
         const colorBulk = Number(config.color?.bulkPrintingPrice) || 0.0;
+        const colorDoubleBulk = Number(config.color?.doubleBulkPrintingPrice) || Number(config.color?.double_bulkPrintingPrice) || 0.0;
 
         updateData[`zikrinterServices.${serviceId}.${sizeKey}_bw_singleSidePrice`] = bwSingle;
         updateData[`zikrinterServices.${serviceId}.${sizeKey}_bw_doubleSidePrice`] = bwDouble;
         updateData[`zikrinterServices.${serviceId}.${sizeKey}_bw_bulkPrintingPrice`] = bwBulk;
+        updateData[`zikrinterServices.${serviceId}.${sizeKey}_bw_double_bulkPrintingPrice`] = bwDoubleBulk;
         updateData[`zikrinterServices.${serviceId}.${sizeKey}_color_singleSidePrice`] = colorSingle;
         updateData[`zikrinterServices.${serviceId}.${sizeKey}_color_doubleSidePrice`] = colorDouble;
         updateData[`zikrinterServices.${serviceId}.${sizeKey}_color_bulkPrintingPrice`] = colorBulk;
+        updateData[`zikrinterServices.${serviceId}.${sizeKey}_color_double_bulkPrintingPrice`] = colorDoubleBulk;
 
         if (sizeKey === 'a4') {
           updateData[`zikrinterServices.${serviceId}.bw_singleSidePrice`] = bwSingle;
           updateData[`zikrinterServices.${serviceId}.bw_doubleSidePrice`] = bwDouble;
           updateData[`zikrinterServices.${serviceId}.bw_bulkPrintingPrice`] = bwBulk;
+          updateData[`zikrinterServices.${serviceId}.bw_double_bulkPrintingPrice`] = bwDoubleBulk;
           updateData[`zikrinterServices.${serviceId}.color_singleSidePrice`] = colorSingle;
           updateData[`zikrinterServices.${serviceId}.color_doubleSidePrice`] = colorDouble;
           updateData[`zikrinterServices.${serviceId}.color_bulkPrintingPrice`] = colorBulk;
+          updateData[`zikrinterServices.${serviceId}.color_double_bulkPrintingPrice`] = colorDoubleBulk;
           updateData[`zikrinterServices.${serviceId}.singleSidePrice`] = colorSingle;
           updateData[`zikrinterServices.${serviceId}.doubleSidePrice`] = colorDouble;
           updateData[`zikrinterServices.${serviceId}.bulkPrintingPrice`] = colorBulk;
+          updateData[`zikrinterServices.${serviceId}.double_bulkPrintingPrice`] = colorDoubleBulk;
         }
       });
     }
