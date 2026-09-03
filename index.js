@@ -1284,18 +1284,46 @@ app.get("/proxy-download", async (req, res, next) => {
       return res.status(400).json({ error: "Unsupported download host" });
     }
 
+    // 🔄 Auto-refresh expired or ephemeral Cloudinary API links on the fly
+    let fetchTargetUrl = parsedUrl.toString();
+    if (parsedUrl.hostname === 'api.cloudinary.com' && parsedUrl.searchParams.has('public_id')) {
+      try {
+        const publicId = parsedUrl.searchParams.get('public_id');
+        const format = parsedUrl.searchParams.get('format') || 'pdf';
+        const type = parsedUrl.searchParams.get('type') || 'upload';
+        const { cloudinary, getConfigForUrl } = require('./cloudinary');
+        const activeConfig = getConfigForUrl(parsedUrl.toString());
+        cloudinary.config(activeConfig);
+
+        const freshExpiry = Math.floor(Date.now() / 1000) + (30 * 24 * 3600);
+        fetchTargetUrl = cloudinary.utils.private_download_url(publicId, format, {
+          resource_type: 'image',
+          type: type,
+          expires_at: freshExpiry
+        });
+        console.log(`🔄 [PROXY] Generated fresh signature for download: ${publicId}`);
+      } catch (refreshErr) {
+        console.warn(`⚠️ [PROXY] Signature refresh skipped: ${refreshErr.message}`);
+      }
+    }
+
     // Strip anything that could break out of the quoted header value.
     const safeName = String(filename || 'download.pdf').replace(/[^A-Za-z0-9._-]/g, '_');
 
     console.log(`📡 [PROXY] Downloading: ${safeName}`);
     const axios = require('axios');
-    const MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024; // bound the transfer; unbounded proxying is a DoS vector
-    const response = await axios.get(parsedUrl.toString(), {
+    const MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024; // bound the transfer
+    const response = await axios.get(fetchTargetUrl, {
       responseType: 'stream',
       timeout: 30000,
       maxContentLength: MAX_DOWNLOAD_BYTES,
       maxBodyLength: MAX_DOWNLOAD_BYTES,
-      maxRedirects: 0, // a redirect could hop off the allowlisted host
+      maxRedirects: 5,
+      beforeRedirect: (options) => {
+        if (!ALLOWED_DOWNLOAD_HOSTS.has(options.hostname)) {
+          throw new Error(`Blocked redirect to disallowed host: ${options.hostname}`);
+        }
+      },
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
       }

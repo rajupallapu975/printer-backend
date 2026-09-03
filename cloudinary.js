@@ -114,9 +114,11 @@ function getSignedUrl(url, config, downloadName = null, explicitPublicId = null,
         if (!publicId) return url;
 
         if (format === 'pdf') {
+            const expiresAt = Math.floor(Date.now() / 1000) + (30 * 24 * 3600); // 30-day validity window (until shopkeeper prints / QR code is scanned)
             return cloudinary.utils.private_download_url(publicId, 'pdf', {
                 resource_type: isRaw ? 'raw' : 'image',
-                type: 'upload'
+                type: 'upload',
+                expires_at: expiresAt
             });
         }
 

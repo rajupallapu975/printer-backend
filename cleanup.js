@@ -36,41 +36,45 @@ async function performCleanup() {
 }
 
 async function deleteOrderFilesFromCloudinary(orderId, orderData, colName) {
-    const publicIds = orderData.publicIds || [];
-    const toDeleteIds = [];
+    const publicIds = [...(orderData.publicIds || [])];
     const displayCode = orderData.pickupCode || orderData.orderCode || orderData.id;
     console.log(`🔍 [${orderId}] Cleanup Check: publicIds=[${publicIds.join(', ')}], code=${displayCode}`);
 
-    // 1️⃣ ID-BASED PURGE
-    if (publicIds.length > 0) {
-        for (const pid of publicIds) {
-            let isShared = false;
-            const sharingOrders = await db.collection("xerox_orders").where("publicIds", "array-contains", pid).limit(2).get();
-            if (sharingOrders.size > 1) isShared = true;
-            
-            if (!isShared) toDeleteIds.push(pid);
+    // Extract any additional publicIds from printSettings.files or fileUrls
+    if (orderData.printSettings?.files && Array.isArray(orderData.printSettings.files)) {
+        for (const f of orderData.printSettings.files) {
+            if (f.publicId && !publicIds.includes(f.publicId)) publicIds.push(f.publicId);
         }
     }
+    if (orderData.coverPagePublicId && !publicIds.includes(orderData.coverPagePublicId)) {
+        publicIds.push(orderData.coverPagePublicId);
+    }
 
-    // 2️⃣ PREFIX-BASED PURGE (Aggressive - catches untracked files like "602862_1" or "file")
     const firstUrl = orderData.fileUrls && orderData.fileUrls.length > 0 ? orderData.fileUrls[0] : null;
     const resolvedConfig = getConfigForUrl(firstUrl);
     cloudinary.config(resolvedConfig);
 
-    if (displayCode) {
-        const foldersToTry = ["xerox_orders", "xerox_processed_orders", "xerox_shop"];
-        for (const prefix of foldersToTry) {
-            const folderPath = `${prefix}/${displayCode}`;
-            console.log(`🧹 Attempting prefix-wipe for: ${folderPath}`);
-            await cloudinary.api.delete_resources_by_prefix(folderPath).catch(() => null);
-            await cloudinary.api.delete_folder(folderPath).catch(() => null);
-        }
+    // 1️⃣ ID-BASED PURGE
+    if (publicIds.length > 0) {
+        console.log(`🗑️ Deleting ${publicIds.length} verified IDs for ${orderId}...`);
+        await cloudinary.api.delete_resources(publicIds, { resource_type: 'image' }).catch(() => null);
+        await cloudinary.api.delete_resources(publicIds, { resource_type: 'raw' }).catch(() => null);
     }
 
-    if (toDeleteIds.length > 0) {
-        console.log(`🗑️ Deleting ${toDeleteIds.length} verified unique files for ${orderId}...`);
-        await cloudinary.api.delete_resources(toDeleteIds, { resource_type: 'image' }).catch(() => null);
-        await cloudinary.api.delete_resources(toDeleteIds, { resource_type: 'raw' }).catch(() => null);
+    // 2️⃣ PREFIX-BASED PURGE (Catches flat files like "xerox_processed_orders/981314_1" and folders "xerox_orders/981314/...")
+    if (displayCode) {
+        const prefixesToTry = [
+            `xerox_orders/${displayCode}`,
+            `xerox_orders/${displayCode}_`,
+            `xerox_processed_orders/${displayCode}`,
+            `xerox_processed_orders/${displayCode}_`,
+            `xerox_shop/${displayCode}`,
+        ];
+        for (const pfx of prefixesToTry) {
+            await cloudinary.api.delete_resources_by_prefix(pfx, { resource_type: 'image' }).catch(() => null);
+            await cloudinary.api.delete_resources_by_prefix(pfx, { resource_type: 'raw' }).catch(() => null);
+            await cloudinary.api.delete_folder(pfx).catch(() => null);
+        }
     }
 }
 
