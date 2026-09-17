@@ -7,6 +7,21 @@ const { dbAdmin, dbCustomer, admin } = require("./firebase");
 
 console.log("🚀 Starting Global Notification Watcher Service...");
 
+function getTimestampMillis(ts) {
+    if (!ts) return Date.now();
+    try {
+        if (typeof ts.toMillis === 'function') return ts.toMillis();
+        if (typeof ts.toDate === 'function') return ts.toDate().getTime();
+        if (ts instanceof Date) return ts.getTime();
+        if (typeof ts === 'number') return ts;
+        if (ts._seconds) return ts._seconds * 1000;
+        const parsed = Date.parse(ts);
+        return isNaN(parsed) ? Date.now() : parsed;
+    } catch (_) {
+        return Date.now();
+    }
+}
+
 // 🛡️ Deduplication Cache
 const payoutNotifiedRecently = new Set(); 
 
@@ -17,15 +32,15 @@ function watchPayoutRequests() {
         .where("status", "==", "pending")
         .onSnapshot(async (snapshot) => {
             snapshot.docChanges().forEach(async (change) => {
-                // 🛡️ Only fire on NEW requests. "modified" is ignored to prevent double-firing 
-                // when we update the "notified" flag in this same listener.
-                if (change.type === "added") {
-                    const requestId = change.doc.id;
+                try {
+                    // 🛡️ Only fire on NEW requests. "modified" is ignored to prevent double-firing 
+                    // when we update the "notified" flag in this same listener.
+                    if (change.type === "added") {
+                        const requestId = change.doc.id;
 
-                    // 🛡️ MEMORY CACHE (Quick exit for this process instance)
-                    if (payoutNotifiedRecently.has(requestId)) return;
+                        // 🛡️ MEMORY CACHE (Quick exit for this process instance)
+                        if (payoutNotifiedRecently.has(requestId)) return;
 
-                    try {
                         const docRef = dbAdmin.collection("withdrawal_requests").doc(requestId);
                         
                         // 🛡️ DATABASE TRANSACTION LOCK (True atomicity across multiple backend instances)
@@ -40,7 +55,7 @@ function watchPayoutRequests() {
                             
                             // Check freshness (Last 2 minutes) to avoid alerting on old data on restart
                             const now = Date.now();
-                            const reqTime = docData.requestedAt ? docData.requestedAt.toMillis() : now;
+                            const reqTime = getTimestampMillis(docData.requestedAt);
                             if (now - reqTime > 120000) return { canSend: false };
 
                             // Mark as notified IMMEDIATELY inside the atomic block
@@ -53,19 +68,13 @@ function watchPayoutRequests() {
                         });
 
                         if (lockResult.canSend) {
-                            // 🛡️ Update local cache immediately
                             payoutNotifiedRecently.add(requestId);
-                            
                             console.log(`💸 Atomic Lock Secured. Sending Payout Alert: ${lockResult.docData.shopName}`);
-                            
-                            // 🚀 Fire and forget (don't await) to keep the listener responsive, 
-                            // or await if you want strict ordering. Awaiting is safer here 
-                            // as it's already guarded by the atomic lock.
                             await sendCaptainPayoutAlert(lockResult.docData, requestId);
                         }
-                    } catch (err) {
-                        console.error(`❌ Atomic Payout Alert Error [${requestId}]:`, err.message);
                     }
+                } catch (err) {
+                    console.error(`❌ Atomic Payout Alert Error:`, err.message);
                 }
             });
         }, (err) => console.error("❌ Payout Listener Error:", err.message));
@@ -84,42 +93,41 @@ async function sendCaptainPayoutAlert(data, requestId) {
             sourceDb = "customer fallback";
         }
 
-        if (!settingsDoc.exists) {
-            console.error("❌ FAILED: 'admin_settings/payout_alerts' does not exist in ANY database.");
+        if (!settingsDoc.exists || !settingsDoc.data().fcmToken) {
+            console.warn(`⚠️ No Captain FCM token found in Firestore (Checked ${sourceDb})`);
             return;
         }
 
-        const fcmToken = settingsDoc.data()?.captain_fcm;
-
-        if (!fcmToken) {
-            console.warn(`⚠️ FAILED: 'captain_fcm' field is missing in '${sourceDb}'.`);
-            return;
-        }
-
-        console.log(`📡 Sending Alert to Captain (Source: ${sourceDb}): ${fcmToken.substring(0, 10)}...`);
-
-        const shopName = data?.shopName || "A shop";
-        const amount = data?.amount || "0";
+        const captainToken = settingsDoc.data().fcmToken;
+        const requestedAmount = data.amount || 0;
+        const shopName = data.shopName || "Unknown Shop";
+        const upiId = data.upiId || "Not Provided";
 
         const message = {
+            notification: {
+                title: "💸 New Withdrawal Request",
+                body: `Shop: ${shopName} has requested a payout of ₹${requestedAmount} via UPI (${upiId}).`
+            },
             data: {
-                title: "💸 Withdrawal Request",
-                body: `${shopName} has requested a payout of ₹${amount}.`,
                 click_action: "FLUTTER_NOTIFICATION_CLICK",
                 category: "payout_request",
-                shopId: data?.shopId || "",
-                requestId: data?.requestId || ""
+                requestId: requestId || "",
+                amount: String(requestedAmount),
+                shopName: shopName
             },
-            token: fcmToken,
+            token: captainToken,
             android: {
                 priority: "high",
+                notification: {
+                    channelId: "admin_payouts",
+                    priority: "high"
+                }
             },
             apns: {
                 payload: {
                     aps: {
                         contentAvailable: true,
-                        sound: "default",
-                        badge: 1
+                        sound: "default"
                     }
                 }
             },
@@ -152,20 +160,24 @@ function watchShopOrdersForDb(dbInstance, dbName) {
         .where("orderStatus", "==", "not printed yet")
         .onSnapshot(async (snapshot) => {
             snapshot.docChanges().forEach(async (change) => {
-                if (change.type === "added" || (change.type === "modified" && change.doc.data().mirroredToAdmin === true)) {
-                    const data = change.doc.data();
-                    
-                    // 🛡️ Test Order Notification Isolation:
-                    const isTestOrder = data.orderType === 'test' || data.environment === 'test' || data.shopId === 'reviewer_shop_store';
-                    const targetShopId = isTestOrder ? 'reviewer_shop_store' : data.shopId;
+                try {
+                    if (change.type === "added" || (change.type === "modified" && change.doc.data().mirroredToAdmin === true)) {
+                        const data = change.doc.data();
+                        
+                        // 🛡️ Test Order Notification Isolation:
+                        const isTestOrder = data.orderType === 'test' || data.environment === 'test' || data.shopId === 'reviewer_shop_store';
+                        const targetShopId = isTestOrder ? 'reviewer_shop_store' : data.shopId;
 
-                    // Prevent duplicate alerts (Use a 60-second freshness window for file uploads)
-                    const now = Date.now();
-                    const orderTime = data.createdAt ? data.createdAt.toMillis() : now;
-                    if (now - orderTime > 60000) return; // Skip older orders
+                        // Prevent duplicate alerts (Use a 60-second freshness window for file uploads)
+                        const now = Date.now();
+                        const orderTime = getTimestampMillis(data.createdAt);
+                        if (now - orderTime > 60000) return; // Skip older orders
 
-                    console.log(`📦 New Shop Order: ${targetShopId} - Ticket ${data.orderCode} [${dbName}] (IsTest: ${isTestOrder})`);
-                    await sendShopkeeperOrderAlert(targetShopId);
+                        console.log(`📦 New Shop Order: ${targetShopId} - Ticket ${data.orderCode} [${dbName}] (IsTest: ${isTestOrder})`);
+                        await sendShopkeeperOrderAlert(targetShopId);
+                    }
+                } catch (err) {
+                    console.error(`❌ [${dbName}] Order processing error:`, err.message);
                 }
             });
         }, (err) => console.error(`❌ [${dbName}] Shop Orders Listener Error:`, err.message));
@@ -229,46 +241,43 @@ function watchOrderCompletionForDb(dbInstance, dbName) {
         .where("orderStatus", "==", "printing completed")
         .onSnapshot(async (snapshot) => {
             snapshot.docChanges().forEach(async (change) => {
-                if (change.type === "added" || (change.type === "modified" && change.doc.data().orderStatus === "printing completed")) {
-                    const data = change.doc.data();
-                    
-                    // Prevent duplicate alerts (Use a 15-second freshness window)
-                    const now = Date.now();
-                    const updateTime = data.printedAt ? data.printedAt.toMillis() : now;
-                    if (now - updateTime > 15000) return;
+                try {
+                    if (change.type === "added" || (change.type === "modified" && change.doc.data().orderStatus === "printing completed")) {
+                        const data = change.doc.data();
+                        
+                        const now = Date.now();
+                        const updateTime = getTimestampMillis(data.printedAt);
+                        if (now - updateTime > 15000) return;
 
-                    // 🛡️ 1. Transaction Deduplication Lock: atomically check and set notificationSent
-                    const orderRef = dbInstance.collection("xerox_orders").doc(change.doc.id);
-                    let shouldSend = false;
+                        const orderRef = dbInstance.collection("xerox_orders").doc(change.doc.id);
+                        let shouldSend = false;
 
-                    try {
-                        await dbInstance.runTransaction(async (transaction) => {
-                            const sfDoc = await transaction.get(orderRef);
-                            if (!sfDoc.exists) return;
+                        try {
+                            await dbInstance.runTransaction(async (transaction) => {
+                                const sfDoc = await transaction.get(orderRef);
+                                if (!sfDoc.exists) return;
 
-                            const oData = sfDoc.data();
-                            if (oData.notificationSent === true) {
-                                return; // Already sent by another instance
-                            }
+                                const oData = sfDoc.data();
+                                if (oData.notificationSent === true) {
+                                    return;
+                                }
 
-                            transaction.update(orderRef, { notificationSent: true });
-                            shouldSend = true;
-                        });
-                    } catch (err) {
-                        console.error(`⚠️ Transaction check failed for ${change.doc.id} on ${dbName}:`, err.message);
-                        return;
+                                transaction.update(orderRef, { notificationSent: true });
+                                shouldSend = true;
+                            });
+                        } catch (err) {
+                            console.error(`⚠️ Transaction check failed for ${change.doc.id} on ${dbName}:`, err.message);
+                            return;
+                        }
+
+                        if (!shouldSend) return;
+
+                        data.orderId = change.doc.id;
+                        console.log(`🖨️ Order Printed on ${dbName}: ${data.orderCode || data.pickupCode} (User: ${data.userId})`);
+                        await sendUserCompletionAlert(data);
                     }
-
-                    if (!shouldSend) {
-                        console.log(`⏭️ Duplicate alert skipped: ${change.doc.id} already processed on ${dbName}.`);
-                        return;
-                    }
-
-                    // Attach orderId securely
-                    data.orderId = change.doc.id;
-
-                    console.log(`🖨️ Order Printed on ${dbName}: ${data.orderCode || data.pickupCode} (User: ${data.userId})`);
-                    await sendUserCompletionAlert(data);
+                } catch (err) {
+                    console.error(`❌ [${dbName}] Completion alert error:`, err.message);
                 }
             });
         }, (err) => console.error(`❌ [${dbName}] xerox_orders Listener Error:`, err.message));

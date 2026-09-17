@@ -2,6 +2,15 @@
 // DEPENDENCIES
 // ============================================================================
 require('dotenv').config();
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('⚠️ [CRITICAL] Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('⚠️ [CRITICAL] Uncaught Exception:', err);
+});
+
 // Validate configuration before any module that depends on it is loaded, so a missing
 // credential surfaces as a startup error naming the variable rather than a confusing
 // runtime failure deep inside a payment or upload path.
@@ -20,6 +29,8 @@ const { createOrder, syncOrderToAdmin, generateUniquePickupCode } = require("./o
 const { applyWatermark } = require("./watermark_service");
 const { generateCoverPage } = require("./cover_page_service");
 const { requireAdminKey } = require("./auth");
+const { requireShopScope } = require("./admin_auth");
+const adminRouter = require("./admin_router");
 require("./notification_watcher"); // 🚀 Start background listeners
 // ============================================================================
 // EXPRESS APP SETUP
@@ -32,6 +43,9 @@ app.use((req, res, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
   next();
 });
+// Mount Admin API Router
+app.use("/admin", adminRouter);
+app.use("/api/admin", adminRouter);
 // Consolidated scheduling moved or updated here
 // Run cleanup once on startup then every 5 minutes
 // performCleanup is already imported on line 14
@@ -117,13 +131,13 @@ app.post("/api/reviewer-token", async (req, res) => {
 // ============================================================================
 // ENDPOINT: TOGGLE SHOP ONLINE / OFFLINE STATUS
 // ============================================================================
-app.post("/api/toggle-shop-status", async (req, res) => {
+app.post("/api/toggle-shop-status", requireShopScope, async (req, res) => {
   try {
     const { shopId, isOpen, sessionId } = req.body;
     if (!shopId) {
       return res.status(400).json({ success: false, error: "shopId is required" });
     }
-    const { dbAdmin } = require("./firebase");
+    const { dbAdmin, dbCustomer, dbCustomer2, dbCustomer3 } = require("./firebase");
     const updateData = {
       isOpen: !!isOpen,
       isCurrentlyOpen: !!isOpen,
@@ -132,7 +146,8 @@ app.post("/api/toggle-shop-status", async (req, res) => {
     if (sessionId) {
       updateData.activeSessionId = sessionId;
     }
-    await dbAdmin.collection("shops").doc(shopId).set(updateData, { merge: true });
+    const allDbs = [dbAdmin, dbCustomer, dbCustomer2, dbCustomer3].filter(Boolean);
+    await Promise.all(allDbs.map(d => d.collection("shops").doc(shopId).set(updateData, { merge: true }).catch(err => console.warn(`Warn mirroring toggle to ${d.projectId}:`, err.message))));
     console.log(`🏪 Shop [${shopId}] status toggled to: ${isOpen ? 'ONLINE' : 'OFFLINE'}`);
     return res.json({ success: true, shopId, isOpen: !!isOpen });
   } catch (err) {
@@ -680,7 +695,7 @@ app.post("/complete-order", async (req, res, next) => {
 // ============================================================================
 // ENDPOINT: MARK AS PRINTING (Download/Print Triggered)
 // ============================================================================
-app.post("/mark-printing", async (req, res, next) => {
+app.post("/mark-printing", requireShopScope, async (req, res, next) => {
   try {
     const { orderId, shopId } = req.body;
     if (!orderId) return res.status(400).json({ error: "orderId required" });
@@ -742,7 +757,7 @@ app.post("/mark-printing", async (req, res, next) => {
 // ============================================================================
 // ENDPOINT: TOGGLE FILE STATUS (Per-File Checkmark Persistence)
 // ============================================================================
-app.post("/api/toggle-file-status", async (req, res, next) => {
+app.post("/api/toggle-file-status", requireShopScope, async (req, res, next) => {
   try {
     const { orderId, shopId, fileIndex, isCompleted } = req.body;
     if (!orderId || fileIndex === undefined) {
@@ -790,7 +805,7 @@ app.post("/api/toggle-file-status", async (req, res, next) => {
 // ============================================================================
 // ENDPOINT: MARK AS PRINTED (Cleanup)
 // ============================================================================
-app.post("/mark-printed", async (req, res, next) => {
+app.post("/mark-printed", requireShopScope, async (req, res, next) => {
   try {
     const { orderId, shopId } = req.body;
     if (!orderId) return res.status(400).json({ error: "orderId required" });
@@ -869,7 +884,7 @@ app.post("/mark-printed", async (req, res, next) => {
 // ============================================================================
 // ENDPOINT: MARK AS DELIVERED (Final Archival)
 // ============================================================================
-app.post("/mark-delivered", async (req, res, next) => {
+app.post("/mark-delivered", requireShopScope, async (req, res, next) => {
   try {
     const { orderId, shopId } = req.body;
     if (!orderId) return res.status(400).json({ error: "orderId required" });
@@ -1403,8 +1418,28 @@ app.post("/set-shop-status", async (req, res, next) => {
 // ============================================================================
 async function incrementServiceVersion() {
   const increment = admin.firestore.FieldValue.increment(1);
-  await dbCustomer.collection("shops").doc("serviceVersion").set({ version: increment }, { merge: true });
-  await dbAdmin.collection("shops").doc("serviceVersion").set({ version: increment }, { merge: true });
+  const targets = [dbCustomer, dbCustomer2, dbCustomer3, dbAdmin].filter(Boolean);
+  const promises = targets.map(async (db) => {
+    try {
+      await db.collection("shops").doc("serviceVersion").set({ version: increment, updatedAt: new Date().toISOString() }, { merge: true });
+      await db.collection("app_config").doc("services_version").set({ version: increment, updatedAt: new Date().toISOString() }, { merge: true });
+    } catch (e) {
+      console.warn(`⚠️ Failed to increment serviceVersion on ${db.projectId}:`, e.message);
+    }
+  });
+  await Promise.all(promises);
+}
+
+async function syncServiceDocToAll(docId, serviceData) {
+  const targets = [dbCustomer, dbCustomer2, dbCustomer3, dbAdmin].filter(Boolean);
+  const promises = targets.map(async (db) => {
+    try {
+      await db.collection("services").doc(docId).set(serviceData);
+    } catch (e) {
+      console.warn(`⚠️ Failed to sync service ${docId} to ${db.projectId}:`, e.message);
+    }
+  });
+  await Promise.all(promises);
 }
 
 app.get("/api/config/version", async (req, res, next) => {
@@ -1452,6 +1487,60 @@ app.get("/api/services/:id", async (req, res, next) => {
   }
 });
 
+function normalizeServiceParameters(params) {
+  if (!params || typeof params !== 'object') return params || {};
+  const normalized = { ...params };
+  
+  // Set fallback bulk keys for 100% backward compatibility with production app
+  const a4BwBulk = normalized['a4_bw_bulkPrinting'] || normalized['a4_bw_double_bulkPrinting'] || normalized['bw_bulkPrinting'] || {};
+  const a4ColorBulk = normalized['a4_color_bulkPrinting'] || normalized['a4_color_double_bulkPrinting'] || normalized['color_bulkPrinting'] || {};
+  const legalBwBulk = normalized['legal_bw_bulkPrinting'] || normalized['legal_bw_double_bulkPrinting'] || normalized['legal_bulkPrinting'] || {};
+
+  const effectiveBwSetPages = normalized['a4_bw_bulkPrinting']?.setPages ?? 
+                              normalized['a4_bw_double_bulkPrinting']?.setPages ?? 
+                              normalized['bw_double_bulkPrinting']?.setPages ?? 
+                              normalized['bw_bulkPrinting']?.setPages ?? 
+                              10;
+
+  const effectiveColorSetPages = normalized['a4_color_bulkPrinting']?.setPages ?? 
+                                normalized['a4_color_double_bulkPrinting']?.setPages ?? 
+                                normalized['color_double_bulkPrinting']?.setPages ?? 
+                                normalized['color_bulkPrinting']?.setPages ?? 
+                                10;
+
+  normalized['bw_bulkPrinting'] = {
+    ...a4BwBulk,
+    ...(normalized['bw_bulkPrinting'] || {}),
+    setPages: effectiveBwSetPages,
+  };
+
+  normalized['color_bulkPrinting'] = {
+    ...a4ColorBulk,
+    ...(normalized['color_bulkPrinting'] || {}),
+    setPages: effectiveColorSetPages,
+  };
+
+  normalized['bulkPrinting'] = {
+    ...normalized['bw_bulkPrinting'],
+    ...(normalized['bulkPrinting'] || {}),
+    setPages: effectiveBwSetPages,
+  };
+
+  normalized['legal_bw_bulkPrinting'] = {
+    ...legalBwBulk,
+    ...(normalized['legal_bw_bulkPrinting'] || {}),
+    setPages: normalized['legal_bw_bulkPrinting']?.setPages ?? effectiveBwSetPages,
+  };
+
+  normalized['legal_bulkPrinting'] = {
+    ...normalized['legal_bw_bulkPrinting'],
+    ...(normalized['legal_bulkPrinting'] || {}),
+    setPages: normalized['legal_bw_bulkPrinting'].setPages,
+  };
+
+  return normalized;
+}
+
 app.post("/api/services", async (req, res, next) => {
   try {
     const serviceData = req.body;
@@ -1467,7 +1556,7 @@ app.post("/api/services", async (req, res, next) => {
       images: serviceData.images || [],
       isActive: serviceData.isActive !== false,
       isAvailable: serviceData.isAvailable !== false,
-      parameters: serviceData.parameters || {},
+      parameters: normalizeServiceParameters(serviceData.parameters),
       customParameters: serviceData.customParameters || [],
       startingPrice: Number(serviceData.startingPrice) || 0.0,
       description: serviceData.description || "",
@@ -1480,8 +1569,7 @@ app.post("/api/services", async (req, res, next) => {
       updatedBy: serviceData.updatedBy || "system_admin",
     };
 
-    await dbCustomer.collection("services").doc(docId).set(newService);
-    await dbAdmin.collection("services").doc(docId).set(newService);
+    await syncServiceDocToAll(docId, newService);
 
     await dbCustomer.collection("service_audit_logs").add({
       serviceId: docId,
@@ -1520,7 +1608,7 @@ app.put("/api/services/:id", async (req, res, next) => {
       images: serviceData.images !== undefined ? serviceData.images : currentData.images,
       isActive: serviceData.isActive !== undefined ? serviceData.isActive : currentData.isActive,
       isAvailable: serviceData.isAvailable !== undefined ? serviceData.isAvailable : (currentData.isAvailable !== undefined ? currentData.isAvailable : true),
-      parameters: serviceData.parameters !== undefined ? serviceData.parameters : currentData.parameters,
+      parameters: serviceData.parameters !== undefined ? normalizeServiceParameters(serviceData.parameters) : currentData.parameters,
       customParameters: serviceData.customParameters !== undefined ? serviceData.customParameters : currentData.customParameters,
       startingPrice: serviceData.startingPrice !== undefined ? Number(serviceData.startingPrice) : currentData.startingPrice,
       description: serviceData.description !== undefined ? serviceData.description : currentData.description,
@@ -1531,8 +1619,7 @@ app.put("/api/services/:id", async (req, res, next) => {
       updatedBy: serviceData.updatedBy || "system_admin",
     };
 
-    await dbCustomer.collection("services").doc(docId).set(updatedService);
-    await dbAdmin.collection("services").doc(docId).set(updatedService);
+    await syncServiceDocToAll(docId, updatedService);
 
     await dbCustomer.collection("service_audit_logs").add({
       serviceId: docId,
@@ -1571,8 +1658,7 @@ app.delete("/api/services/:id", async (req, res, next) => {
       version: currentVersion + 1,
     };
 
-    await dbCustomer.collection("services").doc(docId).set(deletedService);
-    await dbAdmin.collection("services").doc(docId).set(deletedService);
+    await syncServiceDocToAll(docId, deletedService);
 
     await dbCustomer.collection("service_audit_logs").add({
       serviceId: docId,
@@ -1869,19 +1955,20 @@ app.post("/api/shop/pricing", async (req, res, next) => {
       return res.status(400).json({ success: false, error: "shopId and serviceId are required" });
     }
 
-    const updateData = {};
+    const servicePayload = {};
     if (isEnabled !== undefined) {
-      updateData[`zikrinterServices.${serviceId}.isEnabled`] = isEnabled;
+      servicePayload.isEnabled = isEnabled;
     }
 
     if (bindingsPricing) {
-      updateData[`zikrinterServices.${serviceId}.bindings`] = bindingsPricing;
+      servicePayload.bindings = bindingsPricing;
     }
 
     if (pricingData) {
+      servicePayload.paperSizes = servicePayload.paperSizes || {};
       Object.keys(pricingData).forEach(sizeKey => {
         const config = pricingData[sizeKey];
-        updateData[`zikrinterServices.${serviceId}.paperSizes.${sizeKey}`] = config;
+        servicePayload.paperSizes[sizeKey] = config;
 
         const bwSingle = Number(config.bw?.singleSidePrice) || 0.0;
         const bwDouble = Number(config.bw?.doubleSidePrice) || 0.0;
@@ -1893,35 +1980,44 @@ app.post("/api/shop/pricing", async (req, res, next) => {
         const colorBulk = Number(config.color?.bulkPrintingPrice) || 0.0;
         const colorDoubleBulk = Number(config.color?.doubleBulkPrintingPrice) || Number(config.color?.double_bulkPrintingPrice) || 0.0;
 
-        updateData[`zikrinterServices.${serviceId}.${sizeKey}_bw_singleSidePrice`] = bwSingle;
-        updateData[`zikrinterServices.${serviceId}.${sizeKey}_bw_doubleSidePrice`] = bwDouble;
-        updateData[`zikrinterServices.${serviceId}.${sizeKey}_bw_bulkPrintingPrice`] = bwBulk;
-        updateData[`zikrinterServices.${serviceId}.${sizeKey}_bw_double_bulkPrintingPrice`] = bwDoubleBulk;
-        updateData[`zikrinterServices.${serviceId}.${sizeKey}_color_singleSidePrice`] = colorSingle;
-        updateData[`zikrinterServices.${serviceId}.${sizeKey}_color_doubleSidePrice`] = colorDouble;
-        updateData[`zikrinterServices.${serviceId}.${sizeKey}_color_bulkPrintingPrice`] = colorBulk;
-        updateData[`zikrinterServices.${serviceId}.${sizeKey}_color_double_bulkPrintingPrice`] = colorDoubleBulk;
+        servicePayload[`${sizeKey}_bw_singleSidePrice`] = bwSingle;
+        servicePayload[`${sizeKey}_bw_doubleSidePrice`] = bwDouble;
+        servicePayload[`${sizeKey}_bw_bulkPrintingPrice`] = bwBulk;
+        servicePayload[`${sizeKey}_bw_double_bulkPrintingPrice`] = bwDoubleBulk;
+        servicePayload[`${sizeKey}_color_singleSidePrice`] = colorSingle;
+        servicePayload[`${sizeKey}_color_doubleSidePrice`] = colorDouble;
+        servicePayload[`${sizeKey}_color_bulkPrintingPrice`] = colorBulk;
+        servicePayload[`${sizeKey}_color_double_bulkPrintingPrice`] = colorDoubleBulk;
 
         if (sizeKey === 'a4') {
-          updateData[`zikrinterServices.${serviceId}.bw_singleSidePrice`] = bwSingle;
-          updateData[`zikrinterServices.${serviceId}.bw_doubleSidePrice`] = bwDouble;
-          updateData[`zikrinterServices.${serviceId}.bw_bulkPrintingPrice`] = bwBulk;
-          updateData[`zikrinterServices.${serviceId}.bw_double_bulkPrintingPrice`] = bwDoubleBulk;
-          updateData[`zikrinterServices.${serviceId}.color_singleSidePrice`] = colorSingle;
-          updateData[`zikrinterServices.${serviceId}.color_doubleSidePrice`] = colorDouble;
-          updateData[`zikrinterServices.${serviceId}.color_bulkPrintingPrice`] = colorBulk;
-          updateData[`zikrinterServices.${serviceId}.color_double_bulkPrintingPrice`] = colorDoubleBulk;
-          updateData[`zikrinterServices.${serviceId}.singleSidePrice`] = colorSingle;
-          updateData[`zikrinterServices.${serviceId}.doubleSidePrice`] = colorDouble;
-          updateData[`zikrinterServices.${serviceId}.bulkPrintingPrice`] = colorBulk;
-          updateData[`zikrinterServices.${serviceId}.double_bulkPrintingPrice`] = colorDoubleBulk;
+          servicePayload.bw_singleSidePrice = bwSingle;
+          servicePayload.bw_doubleSidePrice = bwDouble;
+          servicePayload.bw_bulkPrintingPrice = bwBulk;
+          servicePayload.bw_double_bulkPrintingPrice = bwDoubleBulk;
+          servicePayload.color_singleSidePrice = colorSingle;
+          servicePayload.color_doubleSidePrice = colorDouble;
+          servicePayload.color_bulkPrintingPrice = colorBulk;
+          servicePayload.color_double_bulkPrintingPrice = colorDoubleBulk;
+          servicePayload.singleSidePrice = colorSingle;
+          servicePayload.doubleSidePrice = colorDouble;
+          servicePayload.bulkPrintingPrice = colorBulk;
+          servicePayload.double_bulkPrintingPrice = colorDoubleBulk;
         }
       });
     }
 
-    updateData[`zikrinterServices.${serviceId}.updatedAt`] = admin.firestore.FieldValue.serverTimestamp();
+    servicePayload.updatedAt = new Date().toISOString();
 
-    await dbAdmin.collection("shops").doc(shopId).update(updateData);
+    const nestedUpdate = {
+      zikrinterServices: {
+        [serviceId]: servicePayload
+      },
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    };
+
+    const { dbCustomer, dbCustomer2, dbCustomer3 } = require("./firebase");
+    const allDbs = [dbAdmin, dbCustomer, dbCustomer2, dbCustomer3].filter(Boolean);
+    await Promise.all(allDbs.map(d => d.collection("shops").doc(shopId).set(nestedUpdate, { merge: true }).catch(err => console.warn(`Warn mirroring pricing to ${d.projectId}:`, err.message))));
     
     await incrementServiceVersion();
 
@@ -2249,4 +2345,10 @@ app.listen(PORT, '0.0.0.0', () => {
 ╚════════════════════════════════════════════════════════════╝
   `);
   printActiveShopsOnStartup();
+  try {
+    const { syncAllShopsPricing } = require("./shop_service");
+    syncAllShopsPricing().catch(err => console.warn("⚠️ Shop sync error on startup:", err.message));
+  } catch (err) {
+    console.warn("⚠️ Could not trigger startup shop sync:", err.message);
+  }
 });
