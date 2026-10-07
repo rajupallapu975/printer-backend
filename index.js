@@ -195,6 +195,19 @@ app.get("/get-xerox-shops", async (req, res, next) => {
       if (!isTestUser && isTestDoc) continue;
       if (isTestUser && !isTestDoc) continue;
 
+      // 🛡️ Operational Status Guard: Do not show suspended/disabled shops to customers
+      const platformStatus = (data.platformStatus || data.status || "active").toString().toLowerCase();
+      if (
+        platformStatus === "suspended" ||
+        platformStatus === "disabled" ||
+        platformStatus === "deactivated" ||
+        data.isSuspended === true ||
+        data.isBlocked === true ||
+        data.isActive === false
+      ) {
+        continue;
+      }
+
       const printersSnapshot = await doc.ref
         .collection("printers")
         .where("isOnline", "==", true)
@@ -1693,6 +1706,18 @@ app.get("/get-xerox-shops", async (req, res, next) => {
       if (!isTestUser && isTestDoc) return;
       if (isTestUser && !isTestDoc) return;
 
+      const platformStatus = (data.platformStatus || data.status || "active").toString().toLowerCase();
+      if (
+        platformStatus === "suspended" ||
+        platformStatus === "disabled" ||
+        platformStatus === "deactivated" ||
+        data.isSuspended === true ||
+        data.isBlocked === true ||
+        data.isActive === false
+      ) {
+        return;
+      }
+
       shops.push({ id: doc.id, ...data });
     });
 
@@ -1760,10 +1785,21 @@ app.get("/api/services/:id/shops", async (req, res, next) => {
 
       const serviceConfig = zikrinterServices[targetServiceId];
 
+      const platformStatus = (shopData.platformStatus || shopData.status || "active").toString().toLowerCase();
+      const isSuspended =
+        platformStatus === "suspended" ||
+        platformStatus === "disabled" ||
+        platformStatus === "deactivated" ||
+        shopData.isSuspended === true;
+
       const isBlocked = shopData.isBlocked === true;
       const isAcceptingOrders = shopData.isAcceptingOrders !== false;
       const isOpen = shopData.isOpen === true;
 
+      if (isSuspended) {
+        console.log(` ❌ Shop [${shopName}] is suspended/disabled (status: ${platformStatus}).`);
+        continue;
+      }
       if (shopData.isActive === false) {
         console.log(` ❌ Shop [${shopName}] is deactivated.`);
         continue;
