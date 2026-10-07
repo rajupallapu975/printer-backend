@@ -2298,6 +2298,152 @@ async function printActiveShopsOnStartup() {
   }
 }
 
+// ============================================================================
+// ENDPOINT: AUTOMATED PRINT JOB (Print Requirements & File URLs only)
+// ============================================================================
+app.get("/api/orders/:orderId/print-job", async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const { findCustomerOrderByIdOrCode, dbAdmin } = require("./firebase");
+
+    if (!orderId) {
+      return res.status(400).json({ success: false, error: "Order ID is required" });
+    }
+
+    // 1. Find the order by ID, pickupCode, or orderCode across all databases
+    let orderData = null;
+    const { doc } = await findCustomerOrderByIdOrCode(orderId);
+    if (doc && doc.exists) {
+      orderData = doc.data();
+    } else {
+      // Check admin shop subcollections
+      const shopSnap = await dbAdmin.collectionGroup("orders").where("orderId", "==", orderId).limit(1).get();
+      if (!shopSnap.empty) {
+        orderData = shopSnap.docs[0].data();
+      } else {
+        const codeSnap = await dbAdmin.collectionGroup("orders").where("pickupCode", "==", orderId).limit(1).get();
+        if (!codeSnap.empty) {
+          orderData = codeSnap.docs[0].data();
+        }
+      }
+    }
+
+    if (!orderData) {
+      return res.status(404).json({ success: false, error: `Order '${orderId}' not found.` });
+    }
+
+    // 2. Extract only print requirements and download file URLs
+    const printSettings = orderData.printSettings || {};
+    const rawFiles = printSettings.files || [];
+    const signedUrls = orderData.fileUrls || [];
+
+    const files = rawFiles.map((file, i) => ({
+      fileName: file.fileName || `${orderId}_${i + 1}.pdf`,
+      fileUrl: signedUrls[i] || file.url || null,
+      printRequirements: {
+        copies: Number(file.copies) || 1,
+        colorMode: (file.color || "BW").toUpperCase() === "COLOR" ? "COLOR" : "BW",
+        duplex: !!(file.doubleSided || file.duplex || file.doubleSide),
+        paperSize: (file.paperSize || printSettings.paperSize || orderData.paperSize || "A4").toUpperCase(),
+        orientation: (file.orientation || "PORTRAIT").toUpperCase(),
+        pageCount: Number(file.pageCount) || 1,
+      },
+    }));
+
+    return res.json({
+      success: true,
+      orderId: orderData.orderId || orderId,
+      pickupCode: orderData.pickupCode || orderData.orderCode || orderId,
+      files,
+    });
+  } catch (error) {
+    console.error("❌ Error in /api/orders/:orderId/print-job:", error);
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ============================================================================
+// ENDPOINT: GET ALL ACTIVE PRINT ORDERS
+// ============================================================================
+app.get("/api/orders/active", async (req, res) => {
+  try {
+    const { shopId } = req.query;
+    const { dbCustomer, dbCustomer2, dbCustomer3, dbAdmin } = require("./firebase");
+
+    const dbs = [
+      { name: 'psfc-43b5a', db: dbCustomer },
+      { name: 'zikrint-944a4', db: dbCustomer2 },
+      { name: 'think-ink', db: dbCustomer3 },
+    ].filter(d => d.db != null);
+
+    const activeOrdersMap = new Map();
+
+    for (const { db } of dbs) {
+      try {
+        let q = db.collection("xerox_orders").where("status", "==", "ACTIVE");
+        if (shopId) {
+          q = q.where("shopId", "==", shopId);
+        }
+        const snap = await q.get();
+        snap.forEach(doc => {
+          const d = doc.data();
+          // Filter out fully completed orders
+          const orderStatus = (d.orderStatus || '').toLowerCase();
+          if (orderStatus !== 'order completed' && orderStatus !== 'completed' && orderStatus !== 'delivered') {
+            const printSettings = d.printSettings || {};
+            const rawFiles = printSettings.files || [];
+            const signedUrls = d.fileUrls || [];
+
+            const formattedFiles = rawFiles.map((file, i) => ({
+              fileName: file.fileName || `${doc.id}_${i + 1}.pdf`,
+              fileUrl: signedUrls[i] || file.url || null,
+              printRequirements: {
+                copies: Number(file.copies) || 1,
+                colorMode: (file.color || "BW").toUpperCase() === "COLOR" ? "COLOR" : "BW",
+                duplex: !!(file.doubleSided || file.duplex || file.doubleSide),
+                paperSize: (file.paperSize || printSettings.paperSize || d.paperSize || "A4").toUpperCase(),
+                orientation: (file.orientation || "PORTRAIT").toUpperCase(),
+                pageCount: Number(file.pageCount) || 1,
+              },
+            }));
+
+            activeOrdersMap.set(doc.id, {
+              orderId: doc.id,
+              pickupCode: d.pickupCode || d.orderCode || doc.id,
+              orderStatus: d.orderStatus || "not printed yet",
+              shopName: d.shopName || null,
+              createdAt: d.createdAt ? d.createdAt.toDate() : null,
+              files: formattedFiles,
+            });
+          }
+        });
+      } catch (err) {
+        console.warn("⚠️ Error fetching active orders from db:", err.message);
+      }
+    }
+
+    const activeOrders = Array.from(activeOrdersMap.values());
+
+    if (activeOrders.length === 0) {
+      return res.json({
+        success: true,
+        message: "No active orders",
+        count: 0,
+        orders: [],
+      });
+    }
+
+    return res.json({
+      success: true,
+      count: activeOrders.length,
+      orders: activeOrders,
+    });
+  } catch (error) {
+    console.error("❌ Error in /api/orders/active:", error);
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // 🏪 SHOP HEARTBEAT AUTO-OFFLINE SWEEPER
 // Sweeps all shops once every 30 seconds and sets them offline if they haven't sent a heartbeat in the last 180 seconds (3 minutes)
 setInterval(async () => {
