@@ -2240,65 +2240,6 @@ app.get("/api/user/order-history", async (req, res, next) => {
 });
 
 // ============================================================================
-// 404 HANDLER (MUST BE LAST)
-// ============================================================================
-app.use((req, res) => {
-  console.log(`⚠️ 404 NOT FOUND: ${req.method} ${req.url}`);
-  res.status(404).json({
-    success: false,
-    error: `Route ${req.method} ${req.url} not found on this server.`
-  });
-});
-
-// ============================================================================
-// ERROR HANDLER
-// ============================================================================
-app.use((err, req, res, next) => {
-  console.error("❌ BACKEND ERROR:", err.stack);
-  res.status(500).json({
-    success: false,
-    error: err.message || "Internal server error"
-  });
-});
-// Note: Scheduled cleanup consolidated at the top of the file
-// ============================================================================
-// ============================================================================
-// START SERVER
-// ============================================================================
-const PORT = process.env.PORT || 5000;
-
-async function printActiveShopsOnStartup() {
-  try {
-    const servicesSnapshot = await dbCustomer.collection("services").get();
-    const activeServiceIds = new Set();
-    servicesSnapshot.forEach(doc => {
-      const data = doc.data();
-      if (data.isDeleted !== true) {
-        activeServiceIds.add(doc.id);
-      }
-    });
-
-    const snapshot = await dbAdmin.collection("shops").get();
-    console.log("\n🏪 ================= ACTIVE SHOPS SUMMARY =================");
-    snapshot.forEach(doc => {
-      const data = doc.data();
-      if (doc.id === "serviceVersion") return;
-      const isOpen = data.isOpen === true;
-      const services = Object.keys(data.zikrinterServices || {})
-        .filter(id => data.zikrinterServices[id].isEnabled === true && activeServiceIds.has(id));
-      if (isOpen) {
-        console.log(` 🟢 Shop: ${data.shopName || doc.id} is ONLINE. Enabled Services: [${services.join(", ")}]`);
-      } else {
-        console.log(` 🔴 Shop: ${data.shopName || doc.id} is OFFLINE.`);
-      }
-    });
-    console.log("============================================================\n");
-  } catch (err) {
-    console.error("Error printing active shops summary:", err.message);
-  }
-}
-
-// ============================================================================
 // ENDPOINT: AUTOMATED PRINT JOB (Print Requirements & File URLs only)
 // ============================================================================
 app.get("/api/orders/:orderId/print-job", async (req, res) => {
@@ -2387,7 +2328,6 @@ app.get("/api/orders/active", async (req, res) => {
         const snap = await q.get();
         snap.forEach(doc => {
           const d = doc.data();
-          // Filter out fully completed orders
           const orderStatus = (d.orderStatus || '').toLowerCase();
           if (orderStatus !== 'order completed' && orderStatus !== 'completed' && orderStatus !== 'delivered') {
             const printSettings = d.printSettings || {};
@@ -2443,6 +2383,65 @@ app.get("/api/orders/active", async (req, res) => {
     return res.status(500).json({ success: false, error: error.message });
   }
 });
+
+// ============================================================================
+// 404 HANDLER (MUST BE LAST)
+// ============================================================================
+app.use((req, res) => {
+  console.log(`⚠️ 404 NOT FOUND: ${req.method} ${req.url}`);
+  res.status(404).json({
+    success: false,
+    error: `Route ${req.method} ${req.url} not found on this server.`
+  });
+});
+
+// ============================================================================
+// ERROR HANDLER
+// ============================================================================
+app.use((err, req, res, next) => {
+  console.error("❌ BACKEND ERROR:", err.stack);
+  res.status(500).json({
+    success: false,
+    error: err.message || "Internal server error"
+  });
+});
+// Note: Scheduled cleanup consolidated at the top of the file
+// ============================================================================
+// ============================================================================
+// START SERVER
+// ============================================================================
+const PORT = process.env.PORT || 5000;
+
+async function printActiveShopsOnStartup() {
+  try {
+    const servicesSnapshot = await dbCustomer.collection("services").get();
+    const activeServiceIds = new Set();
+    servicesSnapshot.forEach(doc => {
+      const data = doc.data();
+      if (data.isDeleted !== true) {
+        activeServiceIds.add(doc.id);
+      }
+    });
+
+    const snapshot = await dbAdmin.collection("shops").get();
+    console.log("\n🏪 ================= ACTIVE SHOPS SUMMARY =================");
+    snapshot.forEach(doc => {
+      const data = doc.data();
+      if (doc.id === "serviceVersion") return;
+      const isOpen = data.isOpen === true;
+      const services = Object.keys(data.zikrinterServices || {})
+        .filter(id => data.zikrinterServices[id].isEnabled === true && activeServiceIds.has(id));
+      if (isOpen) {
+        console.log(` 🟢 Shop: ${data.shopName || doc.id} is ONLINE. Enabled Services: [${services.join(", ")}]`);
+      } else {
+        console.log(` 🔴 Shop: ${data.shopName || doc.id} is OFFLINE.`);
+      }
+    });
+    console.log("============================================================\n");
+  } catch (err) {
+    console.error("Error printing active shops summary:", err.message);
+  }
+}
 
 // 🏪 SHOP HEARTBEAT AUTO-OFFLINE SWEEPER
 // Sweeps all shops once every 30 seconds and sets them offline if they haven't sent a heartbeat in the last 180 seconds (3 minutes)
