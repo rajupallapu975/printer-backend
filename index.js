@@ -2318,6 +2318,17 @@ app.get("/api/orders/active", async (req, res) => {
     ].filter(d => d.db != null);
 
     const activeOrdersMap = new Map();
+    const inactiveStatuses = new Set([
+      'printing completed',
+      'printed',
+      'order completed',
+      'completed',
+      'delivered',
+      'hidden_failed',
+      'refunded',
+      'failed_processing',
+      'cancelled'
+    ]);
 
     for (const { db } of dbs) {
       try {
@@ -2328,8 +2339,8 @@ app.get("/api/orders/active", async (req, res) => {
         const snap = await q.get();
         snap.forEach(doc => {
           const d = doc.data();
-          const orderStatus = (d.orderStatus || '').toLowerCase();
-          if (orderStatus !== 'order completed' && orderStatus !== 'completed' && orderStatus !== 'delivered') {
+          const orderStatus = (d.orderStatus || '').toLowerCase().trim();
+          if (!inactiveStatuses.has(orderStatus)) {
             const printSettings = d.printSettings || {};
             const rawFiles = printSettings.files || [];
             const signedUrls = d.fileUrls || [];
